@@ -182,6 +182,7 @@ tr.tot td:first-child{background:var(--surface-2)}
 <section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></section>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="fileIn" accept="application/json,.json" hidden>
+<input type="file" id="mpIn" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
@@ -314,7 +315,8 @@ function calcVenda(v){
   (v.itens||[]).forEach(it=>{const p=d.prodMap[it.p];const vend=+it.v||0;const pr=it.pr!=null&&it.pr!==""?+it.pr:(p?(+precoCanal(p,v.canal)||0):0);const cu=custoUnit(p,v.canal);q+=vend;bruto+=vend*pr;custo+=vend*cu;itens.push({p:it.p,q:vend,rec:vend*pr,custo:vend*cu})});
   const isCar=v.canal==="Carrinho";
   if(v.hist){const h=v.hist;const f=bruto>0?h.v/bruto:0;itens.forEach(i=>{i.rec*=f});
-    return {q:h.q,receita:h.v,lucro:h.l,custo:h.v-h.l,hist:true,itens,detalhado:itens.length>0,
+    const hl=h.l-(+v.mpTarifa||0);
+    return {q:h.q,receita:h.v,lucro:hl,custo:h.v-hl,mpTarifa:+v.mpTarifa||0,hist:true,itens,detalhado:itens.length>0,
       predio:isCar&&pt.tipo==="Prédio"?h.v*(+pt.pct||0)/100+(+pt.fixo||0):0,vendedora:isCar&&!v.semVendedora?vendCalc(h.q):0,comissaoVend:isCar&&!v.semVendedora?vendCalc(h.q)-(+par.diaria||0):0}}
   const receita=bruto+(+v.ajuste||0);
   let predio=0,vend=0,maq=0,plat=0;
@@ -409,7 +411,7 @@ function pontoEq(per){const r=resumo(vendasPeriodo(per));const fix=(+D().par.fix
 
 /* ================= Vendas ================= */
 function rowVenda(v){const d=D(),c=calcVenda(v),p=d.pontoMap[v.ponto];
-  return `<button class="row" data-act="editVenda" data-id="${esc(v.id)}">${dchip(v.d)}<div class="main"><div class="t">${esc(p?p.nome:"Sem ponto")}</div><div class="s">${v.canal==="Carrinho"||(p&&p.nome===v.canal)?"":`<span class="tag c">${esc(v.canal)}</span> `}${c.q} un${c.hist&&!c.detalhado?' <span class="tag w">sem sabores</span>':""}</div></div><div class="r"><div class="t num">${R(c.receita)}</div><div class="s num ${sgn(c.lucro)}">${R(c.lucro)} · ${P(c.receita?c.lucro/c.receita:0)}</div></div></button>`}
+  return `<button class="row" data-act="editVenda" data-id="${esc(v.id)}">${dchip(v.d)}<div class="main"><div class="t">${esc(p?p.nome:"Sem ponto")}</div><div class="s">${v.canal==="Carrinho"||(p&&p.nome===v.canal)?"":`<span class="tag c">${esc(v.canal)}</span> `}${c.q} un${c.hist&&!c.detalhado?' <span class="tag w">sem sabores</span>':""}${mpTag(v,c)}</div></div><div class="r"><div class="t num">${R(c.receita)}</div><div class="s num ${sgn(c.lucro)}">${R(c.lucro)} · ${P(c.receita?c.lucro/c.receita:0)}</div></div></button>`}
 function vVendas(){
   const ms=meses();const m=UI.vendasMes;const list=vendasPeriodo(m).slice().reverse();const r=resumo(list);
   band("Vendas",cap(mesNome(m)),`<div class="hero"><div><div class="big num">${R0(r.rec)}</div><div class="lbl">${r.q} unidades em ${r.dias} dias</div></div><div class="mini"><div><span class="num ">${R0(r.luc)}</span><div class="lbl">lucro (${P(r.margem)})</div></div></div></div>`);
@@ -649,7 +651,7 @@ function barChart(data){
 /* ================= Mais ================= */
 function vMais(){
   const sub=UI.maisSub;
-  if(sub) return ({iara:mIara,predios:mPredios,escala:mEscala,despesas:mDespesas,cad:mCad,backup:mBackup,sync:mSync})[sub]();
+  if(sub) return ({iara:mIara,predios:mPredios,escala:mEscala,despesas:mDespesas,cad:mCad,backup:mBackup,sync:mSync,mp:mMP})[sub]();
   band("Mais","Controles, cadastros e backup");
   const d=D(),il=iaraLedger();
   return `<div class="menu-grid">
@@ -659,6 +661,7 @@ function vMais(){
   <button data-act="mais" data-k="despesas"><b>Despesas</b><span>Estacionamento e outras</span></button>
   <button data-act="mais" data-k="cad"><b>Cadastros</b><span>Produtos, receitas, insumos, pontos, parâmetros</span></button>
   <button data-act="mais" data-k="backup"><b>Backup</b><span>Exportar e importar dados</span></button>
+  <button data-act="mais" data-k="mp"><b>Mercado Pago</b><span>Importar vendas e tarifas da maquininha</span></button>
   <button data-act="mais" data-k="sync"><b>Sincronização</b><span>${Store.mode==="cloud"?"Conectado"+(Store.user?": "+esc(Store.user.email):""):"Compartilhar com outra pessoa"}</span></button></div>
   <div class="card pad" style="margin-top:14px"><h3 style="font-size:16px;margin-bottom:6px">Instalar no iPhone</h3><p class="small muted" style="margin:0">Abra o endereço do app no Safari, toque em Compartilhar e escolha “Adicionar à Tela de Início”. Ele abre em tela cheia e funciona sem internet.</p></div>`;
 }
@@ -751,6 +754,91 @@ function mSync(){
   <button class="btn pri block" data-act="conectar">Conectar</button></div>`;
 }
 
+/* ================= Mercado Pago ================= */
+function mpTag(v,c){ if(!v.mp||v.canal!=="Carrinho") return ""; const d=c.receita-v.mp.r; return Math.abs(d)<1?' <span class="tag c">MP ok</span>':` <span class="tag w">${d>0?R0(d)+" fora do MP":R0(-d)+" a mais no MP"}</span>` }
+const MPMES={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12};
+const normTxt=t=>String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/tradiconal/g,"tradicional").replace(/limoncell\b/g,"limoncello").replace(/\s+/g," ").trim();
+function mpAutoProd(nome){
+  const d=D(),n=normTxt(nome);const m=n.match(/(\d+)\s*g/);const peso=m?+m[1]:null;const pote=/pote/.test(n);
+  const sab=n.replace(/^bala\s*/,"").replace(/-?\s*\d+\s*g(rs|r|ramas)?s?/g,"").replace(/pote|pouch/g,"").replace(/[-–]+/g," ").replace(/\s+/g," ").trim();
+  const cand=d.cad.produtos.filter(p=>normTxt(p.sabor)===sab&&(peso==null||+p.peso===peso));
+  return (cand.find(p=>pote?/pote/i.test(p.emb):/pouch/i.test(p.emb))||cand[0]||null);
+}
+function mpProd(nome){const map=(D().cad.mpMap)||{};const k=normTxt(nome);if(k in map) return D().prodMap[map[k]]||null;return mpAutoProd(nome)}
+let MP=null;
+async function loadXLSX(){ if(window.XLSX) return; await new Promise((ok,ko)=>{const s=document.createElement("script");s.src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";s.onload=ok;s.onerror=()=>ko(new Error("lib"));document.head.appendChild(s)}) }
+async function lerRelatorioMP(file){
+  await loadXLSX();
+  const wb=XLSX.read(await file.arrayBuffer(),{type:"array"});const ws=wb.Sheets[wb.SheetNames[0]];
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+  let hi=rows.findIndex(r=>r&&String(r[0]||"").trim()==="Número da transação");
+  if(hi<0) throw new Error("formato");
+  const H=rows[hi].map(x=>String(x||"").trim());const col=n=>H.indexOf(n);
+  const ci={id:col("Número da transação"),dt:col("Data da transação"),est:col("Estado"),rec:col("Recebimento"),tar:col("Tarifas e impostos"),can:col("Cancelamentos e reembolsos"),ferr:col("Ferramenta de pagamento"),meio:col("Meio de pagamento"),item:col("Descrição do item"),q:col("Quantidade"),pv:col("Preço de venda")};
+  if([ci.id,ci.dt,ci.rec,ci.item,ci.q].some(x=>x<0)) throw new Error("formato");
+  const topo=rows.slice(0,hi).flat().filter(Boolean).join(" ");const ym=topo.match(/(20\d\d)/);const ano=ym?+ym[1]:new Date().getFullYear();
+  const num=v=>typeof v==="number"?v:(numIn2(v)||0);
+  const tx=[];let cur=null;
+  for(let i=hi+1;i<rows.length;i++){const r=rows[i];if(!r)continue;
+    if(r[ci.id]){ const m=String(r[ci.dt]||"").toLowerCase().match(/(\d{1,2})\s+([a-zç]{3})/); if(!m){cur=null;continue}
+      const d=ano+"-"+pad(MPMES[m[2]]||1)+"-"+pad(+m[1]);
+      cur={id:String(r[ci.id]),d,est:String(r[ci.est]||""),rec:num(r[ci.rec]),tar:-num(r[ci.tar]),can:num(r[ci.can]),ferr:String(r[ci.ferr]||""),meio:String(r[ci.meio]||""),itens:[]};tx.push(cur);}
+    if(cur&&r[ci.item]){const nm=String(r[ci.item]).trim();if(/^pacote de/i.test(nm)||/^link de pagamento$/i.test(nm))continue;cur.itens.push({nome:nm,q:num(r[ci.q])||0,tot:r[ci.pv]==null?null:num(r[ci.pv])})}
+  }
+  const dias={},nomes={};
+  tx.filter(t=>/aprovad/i.test(t.est)).forEach(t=>{
+    const isLink=/link/i.test(t.ferr);const a=dias[t.d]=dias[t.d]||{d:t.d,tx:0,r:0,t:0,q:0,itens:{},links:[],semItem:0};
+    if(isLink){a.links.push(t);return}
+    a.tx++;a.r+=t.rec+Math.min(0,t.can);a.t+=t.tar;if(!t.itens.length)a.semItem+=t.rec;
+    t.itens.forEach(i=>{a.q+=i.q;nomes[i.nome]=(nomes[i.nome]||0)+i.q;const k=i.nome;a.itens[k]=a.itens[k]||{q:0,tot:0,semPreco:0};a.itens[k].q+=i.q;if(i.tot!=null)a.itens[k].tot+=i.tot;else a.itens[k].semPreco+=i.q});
+  });
+  return {dias:Object.values(dias).sort((a,b)=>a.d<b.d?-1:1),nomes,nTx:tx.length,arquivo:file.name};
+}
+function mpDiaApp(d){return D().vendas.filter(v=>v.d===d&&v.canal==="Carrinho")}
+function mMP(){
+  band("Mercado Pago","Importação do relatório de vendas");
+  return backBtn()+`<div class="card pad"><p style="margin-top:0">No site do Mercado Pago, abra <b>Vendas</b>, escolha o período e baixe o relatório em Excel. Depois importe aqui.</p>
+  <p class="small muted">O app compara cada dia com o que foi lançado, grava a <b>tarifa real</b> da maquininha no lucro e pode <b>criar a venda do dia</b> com os sabores vendidos pelo catálogo. Vendas por link de pagamento ficam de fora (normalmente são diretas).</p>
+  <button class="btn pri block" data-act="mpImport">Importar relatório (.xlsx)</button></div>
+  <div class="sec"><h2>Nomes do catálogo</h2></div><p class="help">Como cada produto do Mercado Pago é reconhecido no app. Ajuste se algum ficar errado.</p>
+  <div class="card"><div class="list">${Object.entries(D().cad.mpMap||{}).map(([k,id])=>`<div class="row" style="cursor:default"><div class="main"><div class="t">${esc(k)}</div><div class="s">${esc(prodNome(D().prodMap[id]))}</div></div></div>`).join("")||'<div class="empty small">Os nomes aparecem aqui depois da primeira importação.</div>'}</div></div>`;
+}
+function drawMP(){
+  $("#toast").classList.remove("on");const d=D(),hoje=isoToday();const nomes=Object.keys(MP.nomes).sort();
+  let b=`<p class="help" style="margin-top:0">${esc(MP.arquivo)} · ${MP.nTx} transações · ${MP.dias.length} dias</p>`;
+  b+=`<div class="sec" style="margin-top:4px"><h2 style="font-size:17px">Produtos do Mercado Pago</h2></div><div class="card pad" id="mp-map">${nomes.map(n=>{const p=mpProd(n);return `<div class="itemrow" data-n="${esc(n)}"><div class="nm">${esc(n)}<small>${MP.nomes[n]} un</small></div><select class="mini-in" style="width:150px;text-align:left" data-f="p"><option value="">Ignorar</option>${d.cad.produtos.map(x=>`<option value="${esc(x.id)}" ${p&&p.id===x.id?"selected":""}>${esc(prodNome(x))}</option>`).join("")}</select></div>`}).join("")}</div>`;
+  b+=`<div class="sec"><h2 style="font-size:17px">Conferência por dia</h2></div><div class="card" id="mp-dias">`;
+  MP.dias.forEach((a,i)=>{const vs=mpDiaApp(a.d);const ar=vs.reduce((s,v)=>s+calcVenda(v).receita,0),aq=vs.reduce((s,v)=>s+calcVenda(v).q,0);const dif=ar-a.r;const esc0=d.escala.find(e=>e.d===a.d);
+    const link=a.links.length?`<div class="small muted">Link de pagamento fora da conferência: ${a.links.map(t=>R(t.rec)).join(", ")}</div>`:"";
+    b+=`<div class="row" style="cursor:default;display:block" data-i="${i}"><div style="display:flex;gap:12px;align-items:center">${dchip(a.d)}<div class="main"><div class="t">MP ${R(a.r)} · ${a.q} un</div><div class="s">App ${vs.length?R(ar)+" · "+aq+" un":"sem venda lançada"} · tarifa ${R(a.t)}</div></div><div class="r">${vs.length?(Math.abs(dif)<1?'<span class="tag c">confere</span>':`<span class="tag w">${dif>0?R0(dif)+" fora do MP":R0(-dif)+" a mais no MP"}</span>`):'<span class="tag w">novo</span>'}</div></div>
+    ${vs.length?`<label class="check small" style="margin:8px 0 0 56px"><input type="checkbox" data-f="tar" checked> Gravar tarifa real (${R(a.t)}) no lucro</label>`:`<div style="margin:8px 0 0 56px"><label class="check small" style="margin-bottom:6px"><input type="checkbox" data-f="novo" ${a.d<=hoje?"checked":""}> Criar venda do carrinho com os sabores do MP</label><select class="mini-in" style="width:100%;text-align:left" data-f="ponto"><option value="">Ponto…</option>${d.cad.pontos.filter(p=>p.tipo!=="Online").map(p=>`<option value="${esc(p.id)}" ${esc0&&esc0.ponto===p.id?"selected":""}>${esc(p.nome)}</option>`).join("")}</select></div>`}
+    ${a.semItem?`<div class="small muted" style="margin-left:56px">${R(a.semItem)} recebidos sem produto informado.</div>`:""}<div style="margin-left:56px">${link}</div></div>`;});
+  b+=`</div><p class="help" style="margin-top:8px">“Fora do MP” costuma ser venda em dinheiro ou Pix direto na conta. Reimportar o mesmo período não duplica: as vendas criadas são atualizadas.</p>`;
+  openSheet("Importar Mercado Pago",b,`<button class="btn" data-act="closeSheet">Cancelar</button><button class="btn pri" style="flex:1" data-act="mpAplicar">Aplicar</button>`);
+}
+async function mpAplicar(){
+  const d=D();const map=Object.assign({},d.cad.mpMap||{});
+  document.querySelectorAll("#mp-map .itemrow").forEach(r=>{const v=r.querySelector('[data-f="p"]').value;map[normTxt(r.dataset.n)]=v});
+  const prodDe=n=>{const id=map[normTxt(n)];return id?d.prodMap[id]:null};
+  const porMes={};const get=k=>porMes[k]=porMes[k]||clone(Store.docs[k]||{itens:[]});
+  let novos=0,atual=0,falta=0;
+  document.querySelectorAll("#mp-dias .row").forEach(row=>{const a=MP.dias[+row.dataset.i];const key="v-"+a.d.slice(0,7);const mp={r:Math.round(a.r*100)/100,t:Math.round(a.t*100)/100,q:a.q,tx:a.tx};
+    const vs=mpDiaApp(a.d);
+    if(vs.length){const tar=row.querySelector('[data-f="tar"]');const doc=get(key);
+      vs.forEach((v,k)=>{const x=doc.itens.find(y=>y.id===v.id);if(!x)return;x.mp=mp;if(tar&&tar.checked&&k===0){if(x.hist)x.mpTarifa=mp.t;else x.maq=mp.t}});atual++;}
+    else{const nv=row.querySelector('[data-f="novo"]');if(!nv||!nv.checked)return;const ponto=row.querySelector('[data-f="ponto"]').value;if(!ponto){falta++;return}
+      const itens=[];Object.entries(a.itens).forEach(([n,x])=>{const p=prodDe(n);if(!p||!x.q)return;const ex=itens.find(i=>i.p===p.id);const pr=x.semPreco?null:Math.round(x.tot/x.q*100)/100;
+        if(ex){ex.v+=x.q}else{const o={p:p.id,v:x.q};if(pr!=null&&pr!==+p.precoC)o.pr=pr;itens.push(o)}});
+      const doc=get(key);const id="mp"+a.d.replace(/-/g,"");const old=doc.itens.find(y=>y.id===id);
+      const v=Object.assign(old||{},{id,d:a.d,canal:"Carrinho",ponto,itens,maq:mp.t,mp,obs:"Importado do Mercado Pago"});
+      const extra=Math.round((a.r-itens.reduce((s,i)=>s+i.v*(i.pr!=null?i.pr:+(d.prodMap[i.p].precoC)||0),0))*100)/100; v.ajuste=Math.abs(extra)>=1?extra:null;
+      if(!old)doc.itens.push(v);novos++;}
+  });
+  if(falta&&!confirm(falta+" dia(s) novo(s) sem ponto escolhido serão ignorados. Continuar?"))return;
+  try{ await saveCad(c=>{c.mpMap=map}); for(const [k,doc] of Object.entries(porMes)) await Store.save(k,doc);
+    closeSheet();MP=null;toast(`${atual} dia(s) conferido(s), ${novos} venda(s) criada(s).`);render() }catch(e){}
+}
+
 /* ================= Folha (modal) ================= */
 let lastFocus=null;
 function openSheet(title,body,foot){lastFocus=document.activeElement;const s=$("#sheet");s.innerHTML=`<header><h2 id="sheetTitle">${title}</h2><button class="btn ghost" data-act="closeSheet" aria-label="Fechar">Fechar</button></header><div class="body">${body}</div>${foot?`<footer>${foot}</footer>`:""}`;s.classList.add("open");$("#scrim").classList.add("open");document.body.style.overflow="hidden";const f=s.querySelector("input,select,button");if(f&&!("ontouchstart" in window))f.focus()}
@@ -815,6 +903,9 @@ function exportCSV(){
   saveFile("vendas_"+m+".csv",csv,"text/csv");
 }
 async function exportJSON(){const ok=await saveFile("backup_vai_ter_brigadeiro_"+isoToday()+".json",JSON.stringify({app:"vtb",versao:1,exportado:new Date().toISOString(),docs:Store.docs}),"application/json");if(ok){try{localStorage.setItem("vtb-lastbackup",String(Date.now()))}catch(e){}toast("Backup gerado.");render()}}
+$("#mpIn").addEventListener("change",async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;
+  try{toast("Lendo relatório…");MP=await lerRelatorioMP(f);if(!MP.dias.length){toast("Nenhuma venda aprovada encontrada no arquivo.");return}drawMP()}
+  catch(err){toast(err&&err.message==="lib"?"Sem internet para ler o Excel. Tente com conexão.":"Não reconheci o arquivo. Use o relatório de Vendas do Mercado Pago em Excel.")}});
 $("#fileIn").addEventListener("change",async e=>{const f=e.target.files[0];e.target.value="";if(!f)return;try{const j=JSON.parse(await f.text());const docs=j.docs||j;if(!docs.cad){toast("Arquivo sem cadastros: não parece um backup deste app.");return}
   if(!confirm("Substituir os dados atuais pelos do arquivo?"))return;
   for(const k of Object.keys(Store.docs)) if(!(k in docs)) await Store.remove(k);
@@ -866,6 +957,8 @@ const A={
   copiarConvite:async()=>{const c=Store.cfg;const link=location.origin+location.pathname+"#cfg="+encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify({url:c.url,key:c.key})))));
     try{ if(navigator.share){ await navigator.share({title:"App Vai Ter Brigadeiro",text:"Acesse o app de gestão. Entre com o e-mail e a senha que te passei.",url:link}); return } }catch(e){ if(e&&e.name==="AbortError")return }
     try{ await navigator.clipboard.writeText(link); toast("Link copiado.") }catch(e){ prompt("Copie o link:",link) }},
+  mpImport:()=>$("#mpIn").click(),
+  mpAplicar:()=>mpAplicar(),
   exportCSV:()=>exportCSV(),exportJSON:()=>exportJSON(),importar:()=>$("#fileIn").click()
 };
 document.addEventListener("click",e=>{const a=e.target.closest("[data-act]");if(!a)return;if(a.tagName==="TR"&&e.target.closest("input,select"))return;const fn=A[a.dataset.act];if(fn){e.preventDefault();fn(a)}});
