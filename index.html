@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Brigadeiro">
 <meta name="theme-color" content="#1B3A6A">
@@ -325,7 +326,7 @@ function invalidate(){C=null}
 function D(){
   if(C) return C;
   const docs=Store.docs, cad=docs.cad||{params:{},insumos:[],receitas:[],produtos:[],pontos:[]};
-  const par=Object.assign({diaria:130,comBaixa:.2,comAlta:.4,metaCom:15,maqPct:0,darkPct:8,fixosMes:1400,iaraInicio:"2026-08-31",iaraSaldoIni:0,vendedora:"Iara",alertaValidade:5},cad.params||{});
+  const par=Object.assign({gCorte:42,bCorte:7,pesoBala:6,diaria:130,comBaixa:.2,comAlta:.4,metaCom:15,maqPct:0,darkPct:8,fixosMes:1400,iaraInicio:"2026-08-31",iaraSaldoIni:0,vendedora:"Iara",alertaValidade:5},cad.params||{});
   const vendas=[],movs=[];
   Object.keys(docs).forEach(k=>{ if(k.startsWith("v-")) (docs[k].itens||[]).forEach(x=>vendas.push(x)); if(k.startsWith("m-")) (docs[k].itens||[]).forEach(x=>movs.push(x)); });
   if(Store.papel!=="vendedora") Object.values(Store.vv||{}).forEach(x=>vendas.push(x));
@@ -343,6 +344,13 @@ function custoUnit(p,canal){ if(!p) return 0; const k=p.id+"|"+(isDark(canal)?"d
   const v=custoBala(p)+insUnit(D().insMap[p.embIns])+(+p.adesivo||0)+(isDark(canal)?(+p.sacolaD||0):(+p.sacolaC||0)); cc[k]=v; return v }
 const precoCanal=(p,c)=>isDark(c)?p.precoD:p.precoC;
 const prodNome=p=>p?p.sabor+" · "+p.emb.replace("Pouch ","").replace("Pote ","pote "):"Produto removido";
+const parCorte=()=>{const p=D().par;return {pesoBala:+p.pesoBala||6,gCorte:+p.gCorte||42,bCorte:+p.bCorte||7}};
+const balasPack=p=>p?Math.max(1,Math.round((+p.peso||0)/parCorte().pesoBala)):0;
+function taxaCom(qDia){const p=D().par;return qDia>=(+p.metaCom||0)?(+p.comAlta||0):(+p.comBaixa||0)}
+function grupoDia(v){const d=D();d._g=d._g||{};const car=carDe(v),k=v.d+"|"+car;const stored=v.id?d.vendas.find(x=>x.id===v.id):null;const cacheable=!v.id||stored===v;if(cacheable&&d._g[k])return d._g[k];
+  let rs=d.vendas.filter(x=>x.canal==="Carrinho"&&x.d===v.d&&carDe(x)===car&&x.id!==v.id);if(v.id&&v.itens&&v.canal==="Carrinho")rs.push(v);rs=rs.slice().sort((a,b)=>String(a.id)<String(b.id)?-1:1);let q=0;let leadV=null;const leadP={};
+  rs.forEach(x=>{if(!(x.ponto in leadP)&&!x.hist)leadP[x.ponto]=x.id;if(x.semVendedora)return;if(!leadV)leadV=x.id;q+=x.hist?(+x.hist.q||0):(x.itens||[]).reduce((s,i)=>s+(+i.v||0),0)});
+  const res={q,leadV,leadP};if(cacheable)d._g[k]=res;return res}
 function vendCalc(q){const p=D().par;return (+p.diaria||0)+q*(q>=(+p.metaCom||0)?(+p.comAlta||0):(+p.comBaixa||0))}
 function calcVenda(v){
   const d=D(),par=d.par,pt=d.pontoMap[v.ponto]||{tipo:"",pct:0,fixo:0};
@@ -355,11 +363,11 @@ function calcVenda(v){
       predio:isCar&&pt.tipo==="Prédio"?h.v*(+pt.pct||0)/100+(+pt.fixo||0):0,vendedora:isCar&&!v.semVendedora?vendCalc(h.q):0,comissaoVend:isCar&&!v.semVendedora?vendCalc(h.q)-(+par.diaria||0):0}}
   const receita=bruto+(+v.ajuste||0);
   let predio=0,vend=0,maq=0,plat=0;
-  if(isCar){ if(pt.tipo==="Prédio"&&q>0) predio=bruto*(+pt.pct||0)/100+(+pt.fixo||0); if(!v.semVendedora) vend=vendCalc(q); }
+  if(isCar){ const g=grupoDia(v); if(pt.tipo==="Prédio"&&q>0) predio=bruto*(+pt.pct||0)/100+(g.leadP[v.ponto]===v.id?(+pt.fixo||0):0); if(!v.semVendedora) vend=(g.leadV===v.id?(+par.diaria||0):0)+q*taxaCom(g.q); }
   if(!isDark(v.canal)) maq=(v.maq!=null&&v.maq!=="")?+v.maq:receita*(+par.maqPct||0)/100;
   if(isDark(v.canal)) plat=receita*(+par.darkPct||0)/100+(+v.descPlat||0);
   const lucro=receita-custo-predio-vend-maq-plat;
-  return {q,receita,bruto,custoProd:custo,predio,vendedora:vend,comissaoVend:vend?vend-(+par.diaria||0):0,maq,plat,lucro,custo:receita-lucro,itens,detalhado:true};
+  return {q,receita,bruto,custoProd:custo,predio,vendedora:vend,comissaoVend:isCar&&!v.semVendedora?q*taxaCom(grupoDia(v).q):0,maq,plat,lucro,custo:receita-lucro,itens,detalhado:true};
 }
 function vendasPeriodo(per){const d=D();return per==="tudo"?d.vendas:d.vendas.filter(v=>v.d.slice(0,7)===per)}
 function meses(){const s=new Set(D().vendas.map(v=>v.d.slice(0,7)));s.add(isoToday().slice(0,7));return [...s].sort()}
@@ -381,7 +389,7 @@ function locais(){return [{id:"central",nome:"Cozinha"}].concat(carrinhos().map(
 const locNome=id=>{const l=locais().find(x=>x.id===id);return l?l.nome+(l.sub?" · "+l.sub:""):id};
 const sq=(e,id,loc)=>((e.prod[id]||{})[loc]||0);
 function pontosDoCar(car,extra){return D().cad.pontos.filter(p=>p.tipo!=="Online"&&(!p.car||p.car===car||p.id===extra))}
-const APP_VERSAO="23/10/2026 · acesso das vendedoras";
+const APP_VERSAO="23/10/2026 · produção em etapas + Android";
 const saidaItem=i=>(i.l!=null&&i.r!=null)?Math.max(0,(+i.l||0)-(+i.r||0)):(+i.v||0);
 
 /* ---------- Estoque ---------- */
@@ -390,7 +398,14 @@ function estoque(semVV){
   const prod={},ins={},tracked=new Set();
   const ap=(id,loc,q)=>{prod[id]=prod[id]||{};prod[id][loc]=(prod[id][loc]||0)+q};
   const ai=(id,q)=>{ins[id]=(ins[id]||0)+q;tracked.add(id)};
+  const massa={},balas={};const am=(k,q)=>massa[k]=(massa[k]||0)+q,ab=(k,q)=>balas[k]=(balas[k]||0)+q;
+  const addProd=(m,i)=>{const q=+i.q||0;const dist=i.dist||((m.dest&&m.dest!=="central"&&m.dest!=="dividir")?{[m.dest]:q}:{});let rest=q;Object.entries(dist).forEach(([l,x])=>{ap(i.p,l,+x||0);rest-=+x||0});ap(i.p,"central",rest);const p=d.prodMap[i.p];if(p&&p.embIns&&d.insMap[p.embIns]) ai(p.embIns,-q)};
   d.movs.forEach(m=>{
+    if(m.t==="massa"){ am(m.rec,+m.peso||0); const r=d.recMap[m.rec]; if(r) (r.itens||[]).forEach(it=>ai(it.ins,-(+it.q||0)*(+m.n||0))); return }
+    if(m.t==="corte"){ am(m.rec,-(+m.g||0)); ab(m.rec,+m.balas||0); return }
+    if(m.t==="embalagem"){ (m.itens||[]).forEach(i=>{addProd(m,i);ab(m.rec,-(+i.q||0)*balasPack(d.prodMap[i.p]))}); return }
+    if(m.t==="ajusteMassa"){ am(m.rec,+m.q||0); return }
+    if(m.t==="ajusteBalas"){ ab(m.rec,+m.q||0); return }
     if(m.t==="ajusteProd") (m.itens||[]).forEach(i=>ap(i.p,m.loc||"central",+i.q||0));
     else if(m.t==="producao"){ (m.itens||[]).forEach(i=>{const q=+i.q||0;const dist=i.dist||((m.dest&&m.dest!=="central"&&m.dest!=="dividir")?{[m.dest]:q}:{});let rest=q;Object.entries(dist).forEach(([l,x])=>{ap(i.p,l,+x||0);rest-=+x||0});ap(i.p,"central",rest);const p=d.prodMap[i.p];if(p&&p.embIns&&d.insMap[p.embIns]) ai(p.embIns,-(+i.q||0))}); const r=d.recMap[m.rec]; if(r) (r.itens||[]).forEach(it=>ai(it.ins,-(+it.q||0)*(+m.n||0))); }
     else if(m.t==="envio") (m.itens||[]).forEach(i=>{ap(i.p,"central",-(+i.q||0));ap(i.p,"dark",+i.q||0)});
@@ -402,7 +417,7 @@ function estoque(semVV){
     if(isDark(v.canal)) (v.itens||[]).forEach(i=>ap(i.p,"dark",-(+i.v||0)));
     else if(v.canal==="Carrinho"&&v.estLoc) (v.itens||[]).forEach(i=>ap(i.p,v.estLoc,-(+i.v||0)));
     else (v.itens||[]).forEach(i=>ap(i.p,"central",-(v.canal==="Carrinho"?saidaItem(i):(+i.v||0)))); });
-  d[ck]={prod,ins,tracked};return d[ck];
+  d[ck]={prod,ins,tracked,massa,balas};return d[ck];
 }
 function alertas(){
   const d=D(),e=estoque(),out=[];
@@ -425,6 +440,10 @@ async function publicarPaineis(){
       produtos:prods.map(p=>({id:p.id,sabor:p.sabor,emb:p.emb,preco:+p.precoC||0,ativo:!!p.ativo})),
       estoque:Object.fromEntries(prods.map(p=>[p.id,sq(e,p.id,c.id)])),
       pontos:pontosDoCar(c.id).map(p=>({id:p.id,nome:p.nome,end:p.end||""})),
+      receber:(()=>{const vd=vendedoras().find(x=>x.id===c.vend)||vendedoras()[0];const ini=vd.inicio||"2000-01-01";const par=d.par;const gd={};
+        d.vendas.filter(v=>!v.vv&&v.canal==="Carrinho"&&!v.semVendedora&&v.d>=ini&&vendDe(v)===vd.id).forEach(v=>{const k=v.d+"|"+carDe(v);const x=gd[k]=gd[k]||{d:v.d,car:carDe(v),q:0,ponto:(d.pontoMap[v.ponto]||{}).nome||""};x.q+=calcVenda(v).q});
+        return {vid:vd.id,nome:vd.nome,inicio:ini,saldoIni:+vd.saldoIni||0,diaria:+par.diaria||0,comBaixa:+par.comBaixa||0,comAlta:+par.comAlta||0,metaCom:+par.metaCom||0,dias:Object.values(gd),
+          descontos:d.movs.filter(m=>(m.t==="adiantamento"||m.t==="pagamento")&&m.d>=ini&&(m.vend||"v1")===vd.id).map(m=>({d:m.d,t:m.t,v:+m.v||0,obs:m.obs||""}))}})(),
       escala:d.escala.filter(x=>escCar(x)===c.id&&x.d>=de&&x.d<=ate).map(x=>{const pt=d.pontoMap[x.ponto]||{};return {d:x.d,ponto:x.ponto,nome:pt.nome||"",end:pt.end||""}}).sort((a,b)=>a.d<b.d?-1:1)};
     const sig=JSON.stringify(data);if(_pubLast[c.id]===sig) continue;
     data.atualizado=new Date().toISOString();
@@ -433,6 +452,108 @@ async function publicarPaineis(){
 }
 async function gravarVenda(v,orig){ if(v.vv){ await Store.saveVV(v); return } if(orig&&orig.d.slice(0,7)!==v.d.slice(0,7)) await removeFromMonth("v-"+orig.d.slice(0,7),v.id); await upsertMonth("v-"+v.d.slice(0,7),v) }
 async function apagarVenda(v){ if(v.vv) return Store.removeVV(v.id); return removeFromMonth("v-"+v.d.slice(0,7),v.id) }
+
+/* ================= Produção em etapas ================= */
+const prodsSabor=rec=>{const d=D(),r=d.recMap[rec];return r?d.cad.produtos.filter(p=>p.sabor===r.sabor&&(+p.peso||0)>0&&(p.ativo||Object.values(estoque().prod[p.id]||{}).some(q=>q))):[]};
+const totProd=(e,pid)=>Object.values(e.prod[pid]||{}).reduce((s,q)=>s+q,0);
+function demandaProx(rec,H){
+  const d=D(),hoje=isoToday(),ate=addDays(hoje,H-1),ps=prodsSabor(rec);const dem={};ps.forEach(p=>dem[p.id]=0);
+  const ent=d.escala.filter(x=>x.d>=hoje&&x.d<=ate);ent.forEach(x=>{const sg=sugestaoPonto(x.ponto);sg.prods.forEach(r=>{if(r.id in dem)dem[r.id]+=r.pv})});
+  const ini=addDays(hoje,-30);d.vendas.filter(v=>isDark(v.canal)&&v.d>=ini&&!v.hist).forEach(v=>(v.itens||[]).forEach(i=>{if(i.p in dem)dem[i.p]+=(+i.v||0)/30*H}));
+  return {dem,dias:ent.length};
+}
+function sugestaoEmb(rec,balasDisp,H){
+  const e=estoque(),ps=prodsSabor(rec).filter(p=>p.ativo);const {dem,dias}=demandaProx(rec,H);
+  const rows=ps.map(p=>{const st=totProd(e,p.id);const de=Math.ceil(dem[p.id]||0);return {p,bp:balasPack(p),st,de,need:Math.max(0,de-st),packs:0}});
+  let left=Math.max(0,Math.floor(balasDisp));
+  const totNeed=rows.reduce((t,r)=>t+r.need*r.bp,0);
+  if(totNeed>left&&totNeed>0){const f=left/totNeed;rows.forEach(r=>{const k=Math.floor(r.need*f);r.packs+=k;left-=k*r.bp})}
+  rows.slice().sort((a,b)=>(b.need-b.packs)*b.bp-(a.need-a.packs)*a.bp).forEach(r=>{const k=Math.min(r.need-r.packs,Math.floor(left/r.bp));if(k>0){r.packs+=k;left-=k*r.bp}});
+  const p90=rows.filter(r=>/pouch/i.test(r.p.emb)).sort((a,b)=>a.bp-b.bp||b.de-a.de)[0];
+  if(p90&&left>=p90.bp){const k=Math.floor(left/p90.bp);p90.packs+=k;left-=k*p90.bp}
+  return {rows,left,dias,H};
+}
+function tabelaSug(sg){
+  if(!sg.rows.length) return `<p class="help">Nenhum produto ativo deste sabor.</p>`;
+  return `<div class="card tbl-wrap" style="margin-top:8px"><table><thead><tr><th>Produto</th><th>Estoque</th><th>Previsão ${sg.H}d</th><th>Falta</th><th>Sugestão</th></tr></thead><tbody>${sg.rows.map(r=>`<tr><td>${esc(prodNome(r.p))} <span class="small muted">(${r.bp} balas)</span></td><td class="num">${r.st}</td><td class="num">${r.de}</td><td class="num ${r.need?"neg":""}">${r.need}</td><td class="num"><b>${r.packs}</b></td></tr>`).join("")}</tbody></table></div>
+  <p class="help" style="margin-top:6px">Previsão = média vendida em cada ponto da escala nos próximos ${sg.H} dias (${sg.dias} agendamento(s)) + vendas médias da Dark. Estoque considera todos os locais. Sobram ${sg.left} bala(s) soltas.</p>`;
+}
+function openMassa(m){
+  const d=D();const r0=m?d.recMap[m.rec]:d.cad.receitas[0];
+  VF={mov:m?clone(m):{id:uid("m"),t:"massa",d:isoToday(),rec:r0?r0.id:"",n:r0?r0.n:6,peso:null},novo:!m};drawMassa();
+}
+function drawMassa(){
+  const d=D(),m=VF.mov,r=d.recMap[m.rec];const est=r?(+r.rend||0)*(+m.n||0)/(+r.n||1):0;const custo=r?recCusto(r).lote*(+m.n||0)/(+r.n||1):0;
+  let b=`<div class="frow"><label class="f"><span>Data da produção</span><input type="date" id="ms-d" value="${esc(m.d)}"></label><label class="f"><span>Nº de receitas</span><input inputmode="decimal" id="ms-n" value="${fmtIn(m.n)}"></label></div>
+  <label class="f"><span>Sabor (receita)</span><select id="ms-rec">${d.cad.receitas.map(x=>`<option value="${esc(x.id)}" ${x.id===m.rec?"selected":""}>${esc(x.sabor)}</option>`).join("")}</select></label>
+  <div class="card pad" style="margin-bottom:12px"><div class="kv"><span>Peso estimado (rendimento da receita)</span><b class="num">${N(est)} g</b></div><div class="kv"><span>Custo do lote</span><b class="num">${R(custo)}</b></div><div class="kv"><span>Cortes possíveis (${parCorte().gCorte} g)</span><b class="num">${Math.floor((m.peso||est)/parCorte().gCorte)}</b></div></div>
+  <label class="f"><span>Peso total real da massa (g)</span><input inputmode="decimal" id="ms-peso" value="${fmtIn(m.peso)}" placeholder="${N(est)}"></label>
+  <p class="help">Deixe em branco para usar o peso estimado. Os ingredientes da receita são baixados do estoque de insumos.</p>
+  ${r?`<details style="margin-bottom:12px"><summary class="small muted">Ingredientes usados neste lote</summary><div class="card pad small" style="margin-top:8px">${(r.itens||[]).map(it=>{const i=d.insMap[it.ins]||{};return `<div class="kv"><span>${esc(i.nome||it.ins)}</span><b class="num">${N((+it.q||0)*(+m.n||0))} ${esc(i.unid||"")}</b></div>`}).join("")}</div></details>`:""}
+  <label class="f"><span>Observação</span><input id="ms-obs" value="${esc(m.obs||"")}"></label>${VF.novo?"":`<button class="btn danger block" data-act="delMov">Excluir</button>`}`;
+  openSheet("1 · Produção da massa",b,`<button class="btn" data-act="closeSheet">Cancelar</button><button class="btn pri" style="flex:1" data-act="saveMassa">Salvar produção</button>`);
+}
+function readMassa(){const m=VF.mov;m.d=$("#ms-d").value;m.n=numIn2($("#ms-n").value)||0;m.rec=$("#ms-rec").value;m.peso=numIn2($("#ms-peso").value);m.obs=$("#ms-obs").value;return m}
+function openCorte(m){
+  const d=D();const e=estoque();const rec=m?m.rec:(Object.entries(e.massa).filter(([,g])=>g>0).sort((a,b)=>b[1]-a[1])[0]||[d.cad.receitas[0].id])[0];
+  VF={mov:m?clone(m):{id:uid("m"),t:"corte",d:isoToday(),rec,cortes:0},novo:!m,H:UI.horiz||7};drawCorte();
+}
+function drawCorte(){
+  const d=D(),e=estoque(),m=VF.mov,pc=parCorte();const orig=VF.novo?null:d.movs.find(x=>x.id===m.id);
+  const massaDisp=(e.massa[m.rec]||0)+(orig?(+orig.g||0):0),balasAnt=(e.balas[m.rec]||0)-(orig?(+orig.balas||0):0);
+  let b=`<div class="frow"><label class="f"><span>Data do corte</span><input type="date" id="ct2-d" value="${esc(m.d)}"></label><label class="f"><span>Sabor</span><select id="ct2-rec">${d.cad.receitas.map(x=>`<option value="${esc(x.id)}" ${x.id===m.rec?"selected":""}>${esc(x.sabor)} (${N(Math.max(0,e.massa[x.id]||0))} g)</option>`).join("")}</select></label></div>
+  <div class="card pad" style="margin-bottom:12px"><div class="kv"><span>Massa disponível</span><b class="num">${N(massaDisp)} g</b></div><div class="kv"><span>Cortes possíveis</span><b class="num">${Math.floor(massaDisp/pc.gCorte)}</b></div><div class="kv"><span>Balas já cortadas em estoque</span><b class="num">${N(balasAnt)}</b></div></div>
+  <div class="itemrow" style="border:0"><div class="nm">Nº de cortes<small>cada corte = ${pc.gCorte} g = ${pc.bCorte} balas de ${N(pc.pesoBala)} g</small></div><div class="ctr" id="ct2-ctr"><button type="button" data-act="ctr" data-d="-1" aria-label="Menos">−</button><input data-f="v" id="ct2-n" inputmode="numeric" value="${m.cortes||""}" placeholder="0"><button type="button" class="plus" data-act="ctr" data-d="1" aria-label="Mais">+</button></div></div>
+  <button class="btn block" data-act="corteTudo" data-max="${Math.floor(massaDisp/pc.gCorte)}" style="margin:6px 0 12px">Cortar toda a massa (${Math.floor(massaDisp/pc.gCorte)} cortes)</button>
+  <div id="ct2-res"></div>
+  <div class="frow" style="margin-top:12px"><label class="f"><span>Sugestão para os próximos (dias)</span><input inputmode="numeric" id="ct2-h" value="${VF.H}"></label><div></div></div>
+  <div id="ct2-sug"></div>
+  <label class="f" style="margin-top:12px"><span>Observação</span><input id="ct2-obs" value="${esc(m.obs||"")}"></label>${VF.novo?"":`<button class="btn danger block" data-act="delMov">Excluir</button>`}`;
+  openSheet("2 · Corte das balas",b,`<button class="btn" data-act="closeSheet">Cancelar</button><button class="btn pri" style="flex:1" data-act="saveCorte">Salvar corte</button>`);
+  VF.massaDisp=massaDisp;VF.balasAnt=balasAnt;updCorte();
+}
+function readCorte(){const m=VF.mov,pc=parCorte();m.d=$("#ct2-d").value;m.rec=$("#ct2-rec").value;m.cortes=numIn2($("#ct2-n").value)||0;m.g=m.cortes*pc.gCorte;m.balas=m.cortes*pc.bCorte;m.obs=$("#ct2-obs").value;VF.H=Math.max(1,Math.min(60,numIn2($("#ct2-h").value)||7));UI.horiz=VF.H;return m}
+function updCorte(){if(!VF||!VF.mov||VF.mov.t!=="corte"||!$("#ct2-res"))return;const m=readCorte(),pc=parCorte();const tot=VF.balasAnt+m.balas;const resta=VF.massaDisp-m.g;
+  $("#ct2-res").innerHTML=`<div class="sumbar"><div><b class="num">${m.cortes}</b><span>cortes</span></div><div><b class="num">${N(m.g)} g</b><span>massa usada</span></div><div><b class="num">${m.balas}</b><span>balas novas</span></div><div><b class="num">${tot}</b><span>balas total</span></div></div>${resta<0?`<p class="help neg">O corte usa ${N(-resta)} g a mais que a massa registrada. Confira o peso da produção.</p>`:`<p class="help">Sobram ${N(resta)} g de massa. Com ${tot} balas: até <b>${Math.floor(tot/Math.round(90/pc.pesoBala))}</b> pacotes de 90 g ou <b>${Math.floor(tot/Math.round(180/pc.pesoBala))}</b> de 180 g.</p>`}`;
+  $("#ct2-sug").innerHTML=`<h3 style="font-size:16px;margin:4px 0 0">Sugestão de pacotes</h3>`+tabelaSug(sugestaoEmb(m.rec,tot,VF.H));}
+function openEmbalar(m,rec0){
+  const d=D(),e=estoque();const rec=m?m.rec:(rec0||(Object.entries(e.balas).filter(([,q])=>q>0).sort((a,b)=>b[1]-a[1])[0]||[d.cad.receitas[0].id])[0]);
+  VF={mov:m?clone(m):{id:uid("m"),t:"embalagem",d:isoToday(),rec,itens:[],dest:"central"},novo:!m,H:UI.horiz||7};
+  VF.dist={};(VF.mov.itens||[]).forEach(i=>{if(i.dist)VF.dist[i.p]=Object.assign({},i.dist)});if(!VF.mov.dest)VF.mov.dest=Object.keys(VF.dist).length?"dividir":"central";
+  drawEmbalar();
+}
+function drawEmbalar(){
+  const d=D(),e=estoque(),m=VF.mov;const orig=VF.novo?null:d.movs.find(x=>x.id===m.id);
+  const usadoOrig=orig?(orig.itens||[]).reduce((s,i)=>s+(+i.q||0)*balasPack(d.prodMap[i.p]),0):0;const disp=(e.balas[m.rec]||0)+usadoOrig;
+  const ps=prodsSabor(m.rec);const im={};(m.itens||[]).forEach(i=>im[i.p]=i.q);
+  let b=`<div class="frow"><label class="f"><span>Data da embalagem</span><input type="date" id="pf-d" value="${esc(m.d)}"></label><label class="f"><span>Sabor</span><select id="em-rec">${d.cad.receitas.map(x=>`<option value="${esc(x.id)}" ${x.id===m.rec?"selected":""}>${esc(x.sabor)} (${N(Math.max(0,e.balas[x.id]||0))} balas)</option>`).join("")}</select></label></div>
+  <button class="btn block" data-act="embSugerir" style="margin-bottom:10px">Preencher com a sugestão (próximos ${VF.H} dias)</button>
+  <div class="card pad" id="pf-itens">${ps.map(p=>`<div class="itemrow" data-p="${esc(p.id)}"><div class="nm">${esc(p.emb)}<small>${balasPack(p)} balas por pacote · estoque ${totProd(e,p.id)}</small></div><div class="ctr"><button type="button" data-act="ctr" data-d="-1" aria-label="Menos">−</button><input data-f="v" inputmode="numeric" value="${im[p.id]||""}" placeholder="0"><button type="button" class="plus" data-act="ctr" data-d="1" aria-label="Mais">+</button></div></div>`).join("")||'<p class="muted">Nenhum produto ativo deste sabor.</p>'}</div>
+  <p class="help" id="em-res" style="margin-top:8px"></p>
+  <label class="f"><span>Para onde vão os pacotes</span><select id="pf-dest">${locais().map(l=>`<option value="${esc(l.id)}" ${m.dest===l.id?"selected":""}>${esc(locNome(l.id))}</option>`).join("")}<option value="dividir" ${m.dest==="dividir"?"selected":""}>Dividir entre os locais</option></select></label>
+  <div id="pf-dist"></div>
+  <label class="f"><span>Observação</span><input id="em-obs" value="${esc(m.obs||"")}"></label>${VF.novo?"":`<button class="btn danger block" data-act="delMov">Excluir</button>`}`;
+  openSheet("3 · Embalar",b,`<button class="btn" data-act="closeSheet">Cancelar</button><button class="btn pri" style="flex:1" data-act="saveEmbalar">Salvar embalagem</button>`);
+  VF.disp=disp;updEmb(true);
+}
+function readEmb(){const m=VF.mov;m.d=$("#pf-d").value;m.rec=$("#em-rec").value;m.obs=$("#em-obs").value;m.dest=$("#pf-dest").value;
+  VF.dist=VF.dist||{};document.querySelectorAll("#pf-dist input[data-l]").forEach(inp=>{const p=inp.dataset.p,l=inp.dataset.l;VF.dist[p]=VF.dist[p]||{};const v=numIn2(inp.value);if(v>0)VF.dist[p][l]=v;else delete VF.dist[p][l]});
+  m.itens=[];document.querySelectorAll("#pf-itens .itemrow").forEach(r=>{const q=numIn2(r.querySelector('[data-f="v"]').value)||0;if(q>0){const it={p:r.dataset.p,q};if(m.dest==="dividir"){const ds=VF.dist[it.p]||{};if(Object.keys(ds).length)it.dist=Object.assign({},ds)}m.itens.push(it)}});return m}
+function updEmb(full){if(!VF||!VF.mov||VF.mov.t!=="embalagem"||!$("#em-res"))return;const d=D(),m=readEmb();const usa=m.itens.reduce((s,i)=>s+i.q*balasPack(d.prodMap[i.p]),0);const resta=VF.disp-usa;
+  $("#em-res").innerHTML=`Balas usadas: <b>${usa}</b> de ${N(VF.disp)} disponíveis${resta<0?` <span class="neg">— faltam ${-resta} balas. Registre o corte antes.</span>`:` · sobram ${N(resta)}`}.`;
+  if(full!==false)drawDist();else updRest()}
+
+/* ================= Instalação (Android e iPhone) ================= */
+let _bip=null;window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();_bip=e;try{render()}catch(x){}});
+window.addEventListener("appinstalled",()=>{_bip=null;toast("App instalado.");try{render()}catch(x){}});
+const SO=(()=>{const u=navigator.userAgent||"";return /iphone|ipad|ipod/i.test(u)||(/macintosh/i.test(u)&&navigator.maxTouchPoints>1)?"ios":/android/i.test(u)?"android":"outro"})();
+const instalado=()=>window.matchMedia&&window.matchMedia("(display-mode: standalone)").matches||navigator.standalone===true;
+function cardInstalar(compacto){
+  if(instalado())return "";
+  if(SO==="android") return `<div class="card pad" style="margin-bottom:12px"><h3 style="font-size:16px;margin-bottom:6px">Instale o app no seu Android</h3>${_bip?`<button class="btn pri block" data-act="instalarApp">Instalar app</button>`:`<p class="small muted" style="margin:0">No <b>Chrome</b>, toque no menu <b>⋮</b> (canto superior direito) e escolha <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.</p>`}</div>`;
+  if(SO==="ios") return `<div class="card pad" style="margin-bottom:12px"><h3 style="font-size:16px;margin-bottom:6px">Instale o app no seu iPhone</h3><p class="small muted" style="margin:0">No <b>Safari</b>, toque em <b>Compartilhar</b> (quadrado com seta para cima) e escolha <b>Adicionar à Tela de Início</b>. Depois abra pelo ícone.</p></div>`;
+  return compacto?"":`<div class="card pad" style="margin-bottom:12px"><p class="small muted" style="margin:0">No celular: Android, abra no Chrome › menu ⋮ › Instalar app. iPhone, abra no Safari › Compartilhar › Adicionar à Tela de Início.</p></div>`;
+}
 
 /* ================= Navegação ================= */
 const UI={tab:"inicio",per:null,vendasMes:null,estTab:"produtos",anTab:"pontos",maisSub:null,cadTab:"produtos",itemAgr:"produto"};
@@ -451,7 +572,7 @@ function render(){
   if(Store.loaded&&!Store.needLogin&&Store.papel==="vendedora") return renderVend();
   renderTabs();
   if(!Store.loaded){ band("Carregando…","","",1); return }
-  if(Store.needLogin){ band("Entrar","Acesso compartilhado","",1); $("#view").innerHTML=`<div class="card pad"><label class="f"><span>E-mail</span><input id="lg-e" type="email" autocomplete="username" inputmode="email"></label><label class="f"><span>Senha</span><input id="lg-s" type="password" autocomplete="current-password"></label><button class="btn pri block" data-act="login">Entrar</button><p class="help" style="margin-top:12px">Use o e-mail e a senha criados pelo responsável do app.</p></div><button class="btn ghost" data-act="desconectar" style="margin-top:10px">Usar sem nuvem neste aparelho</button>`; return }
+  if(Store.needLogin){ band("Entrar","Acesso compartilhado","",1); $("#view").innerHTML=cardInstalar(1)+`<div class="card pad"><label class="f"><span>E-mail</span><input id="lg-e" type="email" autocomplete="username" inputmode="email"></label><label class="f"><span>Senha</span><input id="lg-s" type="password" autocomplete="current-password"></label><button class="btn pri block" data-act="login">Entrar</button><p class="help" style="margin-top:12px">Use o e-mail e a senha criados pelo responsável do app.</p></div><button class="btn ghost" data-act="desconectar" style="margin-top:10px">Usar sem nuvem neste aparelho</button>`; return }
   if(!Store.docs.cad&&Store.mode==="cloud"&&!Store.offline){ band("Sem dados na nuvem","","",1); $("#view").innerHTML=`<div class="card pad"><h3 style="font-size:17px;margin-bottom:8px">Nenhum dado liberado para ${esc(Store.user?Store.user.email:"este usuário")}</h3><p class="small muted" style="margin-top:0">Normalmente o e-mail ainda não está na lista de membros do Supabase (tabela <b>membros</b>). Peça ao responsável para incluir exatamente este e-mail e depois toque em Recarregar.</p><button class="btn pri block" data-act="recarregar">Recarregar</button><div style="height:10px"></div><button class="btn block" data-act="logout">Sair e entrar com outro e-mail</button></div><details style="margin-top:14px"><summary class="small muted">Sou o responsável e quero enviar um backup para a nuvem</summary><button class="btn block" data-act="importar" style="margin-top:10px">Importar backup</button></details>`; return }
   if(!Store.docs.cad){ band("Bem-vindo","","",1); $("#view").innerHTML=`<div class="card empty"><h3>Comece importando seus dados</h3><p>Toque abaixo e escolha o arquivo backup_inicial_vai_ter_brigadeiro.json (ou um backup mais recente).</p><button class="btn pri" data-act="importar">Importar backup</button></div>${Store.mode==="local"?`<div class="card pad" style="margin-top:12px"><h3 style="font-size:16px;margin-bottom:6px">Os dados já estão na nuvem?</h3><p class="small muted" style="margin-top:0">Cole a Project URL e a chave anon do Supabase para entrar com seu e-mail e senha.</p><label class="f"><span>Project URL</span><input id="sy-u" placeholder="https://xxxx.supabase.co" autocapitalize="off" autocorrect="off"></label><label class="f"><span>Chave anon public</span><input id="sy-k" placeholder="eyJ…" autocapitalize="off" autocorrect="off"></label><button class="btn block" data-act="conectar">Conectar à nuvem</button></div>`:""}`; return }
   if(!UI.per) UI.per=isoToday().slice(0,7);
@@ -581,8 +702,8 @@ async function removeFromMonth(key,id){const doc=clone(Store.docs[key]||{itens:[
 function vEstoque(){
   const d=D(),e=estoque();const L=locais();const tot=l=>Object.values(e.prod).reduce((s,x)=>s+Math.max(0,x[l.id]||0),0);
   band("Estoque",`Base de contagem: ${fmtD(d.par.baseEstoque||"2026-10-20")}`,`<div class="locgrid">${L.map(l=>`<button data-act="estLoc" data-k="${esc(l.id)}"><b class="num">${tot(l)}</b><span>${esc(l.nome)}${l.sub?"<br>"+esc(l.sub):""}</span></button>`).join("")}</div>`);
-  let h=`<div class="seg" role="group" aria-label="Tipo de estoque">${[["produtos","Produtos"],["insumos","Insumos"],["movs","Movimentos"]].map(([k,l])=>`<button data-act="estTab" data-k="${k}" aria-pressed="${UI.estTab===k}">${l}</button>`).join("")}</div>
-  <div class="grid2" style="margin:12px 0"><button class="btn pri" data-act="formProducao">Registrar produção</button><button class="btn pri" data-act="formTransf" data-de="central" data-para="${esc(carrinhos()[0].id)}">Abastecer carrinho</button><button class="btn" data-act="formTransf" data-de="${esc(carrinhos()[0].id)}" data-para="central">Recolher p/ cozinha</button><button class="btn" data-act="formTransf" data-de="central" data-para="dark">Enviar p/ Dark</button><button class="btn" data-act="formCompra">Compra de insumo</button><button class="btn" data-act="formContagem">Contagem / ajuste</button></div>
+  let h=`<div class="seg" role="group" aria-label="Tipo de estoque">${[["produtos","Produtos"],["producao","Produção"],["insumos","Insumos"],["movs","Movimentos"]].map(([k,l])=>`<button data-act="estTab" data-k="${k}" aria-pressed="${UI.estTab===k}">${l}</button>`).join("")}</div>
+  <div class="grid2" style="margin:12px 0"><button class="btn pri" data-act="formMassa">1 · Produção</button><button class="btn pri" data-act="formCorte">2 · Corte</button><button class="btn pri" data-act="formEmbalar">3 · Embalar</button><button class="btn pri" data-act="formTransf" data-de="central" data-para="${esc(carrinhos()[0].id)}">4 · Distribuir</button><button class="btn" data-act="formCompra">Compra de insumo</button><button class="btn" data-act="formContagem">Contagem / ajuste</button></div>
   ${multiCar()?"":`<div class="alert"><span>Hoje há um carrinho cadastrado. <a href="#" data-act="abrirCarrinhos" style="color:var(--accent-text);font-weight:700">Cadastrar o segundo carrinho</a></span></div>`}`;
   if(UI.estTab==="produtos"){
     const loc=UI.estLoc||"todos";
@@ -596,12 +717,18 @@ function vEstoque(){
       h+=`<div class="sec" style="margin-top:4px"><h2>${esc(locNome(lo.id))}</h2></div><div class="card tbl-wrap"><table><thead><tr><th>Produto</th><th>Em estoque</th>${temV?"<th>Vendido hoje</th>":""}<th>Custo un.</th></tr></thead><tbody>${prods.filter(p=>sq(e,p.id,loc)||vend[p.id]||loc==="central").map(p=>{const q=sq(e,p.id,loc);return `<tr><td>${esc(prodNome(p))}</td><td class="num ${q<0?"neg":""}">${q}</td>${temV?`<td class="num">${vend[p.id]||""}</td>`:""}<td class="num">${R(custoUnit(p,loc==="dark"?"Dark Store":"Carrinho"))}</td></tr>`}).join("")||`<tr><td colspan="3" class="muted">Sem produtos neste local.</td></tr>`}</tbody></table></div>`;
     }
     h+=`<p class="help" style="margin-top:8px">A produção entra na cozinha. Na produção dá para mandar direto para um carrinho, para a Dark ou dividir entre os locais. Toda transferência baixa da origem e soma no destino automaticamente. Cada venda baixa o estoque do próprio carrinho (ou da Dark). Vendas importadas das planilhas não mexem no estoque.</p>`;
+  }else if(UI.estTab==="producao"){
+    const pc=parCorte();const rows=d.cad.receitas.map(r=>{const ps=prodsSabor(r.id);return {r,mg:e.massa[r.id]||0,bl:e.balas[r.id]||0,emb:ps.reduce((s,p)=>s+(e.prod[p.id]&&e.prod[p.id].central||0),0)}}).filter(x=>x.mg||x.bl||x.emb);
+    h+=`<div class="card pad" style="margin-bottom:12px"><div class="small muted">Fluxo</div><div style="font-family:var(--fd);font-weight:700;margin-top:4px">Produção (massa, g) → Corte (${pc.gCorte} g = ${pc.bCorte} balas) → Embalar (pacotes) → Distribuir (carrinhos, Dark)</div></div>`;
+    h+=rows.length?`<div class="card tbl-wrap"><table><thead><tr><th>Sabor</th><th>Massa</th><th>Cortes possíveis</th><th>Balas soltas</th><th>Pacotes na cozinha</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.r.sabor)}</td><td class="num ${x.mg<0?"neg":""}">${N(x.mg)} g</td><td class="num">${Math.max(0,Math.floor(x.mg/pc.gCorte))}</td><td class="num ${x.bl<0?"neg":""}">${N(x.bl)}</td><td class="num">${x.emb}</td></tr>`).join("")}</tbody></table></div>`:`<div class="card empty"><h3>Nada em produção</h3><p>Comece em “1 · Produção”.</p></div>`;
+    const ult=d.movs.filter(m=>["massa","corte","embalagem"].includes(m.t)).slice().reverse().slice(0,15);
+    if(ult.length) h+=`<div class="sec"><h2>Últimas etapas</h2></div><div class="card"><div class="list">${ult.map(m=>{const rr=d.recMap[m.rec];const t=m.t==="massa"?`Produção ${rr?rr.sabor:""}`:m.t==="corte"?`Corte ${rr?rr.sabor:""}`:`Embalagem ${rr?rr.sabor:""}`;const ss=m.t==="massa"?`${N(m.n)} receita(s) · ${N(m.peso)} g`:m.t==="corte"?`${m.cortes} cortes · ${m.balas} balas`:(m.itens||[]).map(i=>prodNome(d.prodMap[i.p]).split(" · ")[1]+" ×"+i.q).join(", ")+(m.dest&&m.dest!=="central"?(m.dest==="dividir"?" · dividido":" → "+locNome(m.dest)):"");return `<button class="row" data-act="editMov" data-id="${esc(m.id)}">${dchip(m.d)}<div class="main"><div class="t">${esc(t)}</div><div class="s">${esc(ss)}</div></div></button>`}).join("")}</div></div>`;
   }else if(UI.estTab==="insumos"){
     h+=`<div class="card tbl-wrap"><table><thead><tr><th>Insumo</th><th>Estoque</th><th>Mínimo</th><th>Preço un.</th></tr></thead><tbody>${d.cad.insumos.map(i=>{const t=e.tracked.has(i.id);const q=e.ins[i.id]||0;const low=t&&(+i.minimo||0)>0&&q<+i.minimo;return `<tr><td>${esc(i.nome)}</td><td class="num ${low?"neg":""}">${t?N(q)+" "+esc(i.unid):'<span class="muted">sem contagem</span>'}</td><td class="num">${i.minimo?N(i.minimo):"–"}</td><td class="num">${R(insUnit(i)*(i.unid==="un"?1:1000))}${i.unid==="un"?"":"/k"+(i.unid==="ml"?"l":"g")}</td></tr>`}).join("")}</tbody></table></div><p class="help" style="margin-top:8px">Faça a primeira contagem em “Contagem / ajuste” para o app passar a controlar cada insumo. Produções descontam os ingredientes da receita e a embalagem.</p>`;
   }else{
-    const ms=d.movs.filter(m=>["producao","envio","transf","compra","ajusteProd","ajusteIns"].includes(m.t)).slice().reverse().slice(0,80);
-    h+=ms.length?`<div class="card"><div class="list">${ms.map(m=>{const q=(m.itens||[]).reduce((s,i)=>s+(+i.q||0),0);const t={producao:"Produção "+(d.recMap[m.rec]?d.recMap[m.rec].sabor:"")+(m.dest&&m.dest!=="central"?(m.dest==="dividir"?" (dividida entre locais)":" → "+locNome(m.dest)):""),envio:"Cozinha → Dark Store",transf:locNome(m.de)+" → "+locNome(m.para),compra:"Compra "+(d.insMap[m.ins]?d.insMap[m.ins].nome:""),ajusteProd:"Ajuste em "+locNome(m.loc||"central"),ajusteIns:"Ajuste "+(d.insMap[m.ins]?d.insMap[m.ins].nome:"")}[m.t];
-      const s=m.t==="compra"?N(m.q)+" "+(d.insMap[m.ins]?d.insMap[m.ins].unid:"")+" · "+R(m.v):m.t==="ajusteIns"?(m.q>0?"+":"")+N(m.q):((m.t==="ajusteProd"&&q>0)?"+":"")+q+" un"+(m.validade?" · validade "+fmtD(m.validade):"");
+    const ms=d.movs.filter(m=>["producao","massa","corte","embalagem","envio","transf","compra","ajusteProd","ajusteIns","ajusteMassa","ajusteBalas"].includes(m.t)).slice().reverse().slice(0,80);
+    h+=ms.length?`<div class="card"><div class="list">${ms.map(m=>{const q=(m.itens||[]).reduce((s,i)=>s+(+i.q||0),0);const t={producao:"Produção "+(d.recMap[m.rec]?d.recMap[m.rec].sabor:"")+(m.dest&&m.dest!=="central"?(m.dest==="dividir"?" (dividida entre locais)":" → "+locNome(m.dest)):""),envio:"Cozinha → Dark Store",transf:locNome(m.de)+" → "+locNome(m.para),compra:"Compra "+(d.insMap[m.ins]?d.insMap[m.ins].nome:""),ajusteProd:"Ajuste em "+locNome(m.loc||"central"),ajusteIns:"Ajuste "+(d.insMap[m.ins]?d.insMap[m.ins].nome:""),massa:"Produção "+((d.recMap[m.rec]||{}).sabor||""),corte:"Corte "+((d.recMap[m.rec]||{}).sabor||""),embalagem:"Embalagem "+((d.recMap[m.rec]||{}).sabor||""),ajusteMassa:"Ajuste massa "+((d.recMap[m.rec]||{}).sabor||""),ajusteBalas:"Ajuste balas "+((d.recMap[m.rec]||{}).sabor||"")}[m.t];
+      const s=m.t==="massa"?N(m.n)+" receita(s) · "+N(m.peso)+" g":m.t==="corte"?m.cortes+" cortes · "+N(m.g)+" g · "+m.balas+" balas":m.t==="ajusteMassa"?(m.q>0?"+":"")+N(m.q)+" g":m.t==="ajusteBalas"?(m.q>0?"+":"")+N(m.q)+" balas":m.t==="compra"?N(m.q)+" "+(d.insMap[m.ins]?d.insMap[m.ins].unid:"")+" · "+R(m.v):m.t==="ajusteIns"?(m.q>0?"+":"")+N(m.q):((m.t==="ajusteProd"&&q>0)?"+":"")+q+" un"+(m.validade?" · validade "+fmtD(m.validade):"");
       return `<button class="row" data-act="editMov" data-id="${esc(m.id)}">${dchip(m.d)}<div class="main"><div class="t">${esc(t)}</div><div class="s">${esc(s)}${m.obs?" · "+esc(m.obs):""}</div></div></button>`}).join("")}</div></div>`:`<div class="card empty"><h3>Sem movimentos</h3><p>Registre uma produção, transferência, compra ou contagem.</p></div>`;
   }
   return h;
@@ -673,8 +800,9 @@ function openCompra(m){
 }
 function openContagem(){
   const d=D(),e=estoque();VF={tipo:"prod",loc:"central"};
-  const drawC=()=>{const t=VF.tipo;let b=`<label class="f"><span>O que contar</span><select id="ct-loc">${locais().map(l=>`<option value="${esc(l.id)}" ${t==="prod"&&VF.loc===l.id?"selected":""}>Produtos em ${esc(locNome(l.id))}</option>`).join("")}<option value="ins" ${t==="ins"?"selected":""}>Insumos</option></select></label><p class="help">Informe a quantidade contada agora. Deixe em branco o que não contou. O app grava a diferença como ajuste.</p><div class="card pad" id="ct-itens">`;
+  const drawC=()=>{const t=VF.tipo;let b=`<label class="f"><span>O que contar</span><select id="ct-loc">${locais().map(l=>`<option value="${esc(l.id)}" ${t==="prod"&&VF.loc===l.id?"selected":""}>Produtos em ${esc(locNome(l.id))}</option>`).join("")}<option value="ins" ${t==="ins"?"selected":""}>Insumos</option><option value="massa" ${t==="massa"?"selected":""}>Massa (g)</option><option value="balas" ${t==="balas"?"selected":""}>Balas cortadas (un)</option></select></label><p class="help">Informe a quantidade contada agora. Deixe em branco o que não contou. O app grava a diferença como ajuste.</p><div class="card pad" id="ct-itens">`;
     if(t==="prod"){ b+=d.cad.produtos.filter(p=>p.ativo||sq(e,p.id,VF.loc)).map(p=>{const s=sq(e,p.id,VF.loc);return `<div class="itemrow" data-id="${esc(p.id)}" data-cur="${s}"><div class="nm">${esc(prodNome(p))}<small>sistema: ${s} un</small></div><input class="mini-in" inputmode="numeric" placeholder="${s}"></div>`}).join("") }
+    else if(t==="massa"||t==="balas"){ const src=t==="massa"?e.massa:e.balas; b+=d.cad.receitas.map(rc=>{const s=Math.round((src[rc.id]||0)*100)/100;return `<div class="itemrow" data-id="${esc(rc.id)}" data-cur="${s}"><div class="nm">${esc(rc.sabor)}<small>sistema: ${N(s)} ${t==="massa"?"g":"balas"}</small></div><input class="mini-in" style="width:86px" inputmode="decimal" placeholder="${N(s)}"></div>`}).join("") }
     else { b+=d.cad.insumos.map(i=>{const s=e.ins[i.id]||0;return `<div class="itemrow" data-id="${esc(i.id)}" data-cur="${s}"><div class="nm">${esc(i.nome)}<small>sistema: ${e.tracked.has(i.id)?N(s)+" "+esc(i.unid):"sem contagem"} · emb. ${N(i.emb)} ${esc(i.unid)}</small></div><input class="mini-in" style="width:86px" inputmode="decimal" placeholder="${esc(i.unid)}"></div>`}).join("") }
     b+=`</div><label class="f" style="margin-top:12px"><span>Data</span><input type="date" id="ct-d" value="${isoToday()}"></label>`;
     openSheet("Contagem de estoque",b,`<button class="btn" data-act="closeSheet">Cancelar</button><button class="btn pri" style="flex:1" data-act="saveContagem">Salvar contagem</button>`)};
@@ -789,12 +917,13 @@ function vMais(){
   <button data-act="mais" data-k="mp"><b>Mercado Pago</b><span>Importar vendas e tarifas da maquininha</span></button>
   <button data-act="mais" data-k="acessos"><b>Acessos das vendedoras</b><span>Quem entra e em qual carrinho</span></button>
   <button data-act="mais" data-k="sync"><b>Sincronização</b><span>${Store.mode==="cloud"?"Conectado"+(Store.user?": "+esc(Store.user.email):""):"Compartilhar com outra pessoa"}</span></button></div>
-  <div class="card pad" style="margin-top:14px"><h3 style="font-size:16px;margin-bottom:6px">Instalar no iPhone</h3><p class="small muted" style="margin:0">Abra o endereço do app no Safari, toque em Compartilhar e escolha “Adicionar à Tela de Início”. Ele abre em tela cheia e funciona sem internet.</p></div><p class="help" style="text-align:center;margin-top:14px">Versão ${esc(APP_VERSAO)}</p>`;
+  <div style="margin-top:14px">${cardInstalar()}</div><p class="help" style="text-align:center;margin-top:14px">Versão ${esc(APP_VERSAO)}</p>`;
 }
 const backBtn=()=>`<button class="btn ghost" data-act="mais" data-k="" style="margin:-4px 0 6px">‹ Voltar</button>`;
 function iaraLedger(vid){
   const d=D(),par=d.par;vid=vid||UI.vend||"v1";const vd=vendedoras().find(x=>x.id===vid)||vendedoras()[0];const ini=vd.inicio||"2000-01-01";const ent=[];
-  d.vendas.filter(v=>v.canal==="Carrinho"&&!v.semVendedora&&v.d>=ini&&vendDe(v)===vd.id).forEach(v=>{const c=calcVenda(v);const com=vendCalc(c.q)-(+par.diaria||0);ent.push({d:v.d,tipo:"dia",ponto:v.ponto,q:c.q,diaria:+par.diaria||0,com,cred:(+par.diaria||0)+com,deb:0,id:v.id})});
+  const gd={};d.vendas.filter(v=>v.canal==="Carrinho"&&!v.semVendedora&&v.d>=ini&&vendDe(v)===vd.id).forEach(v=>{const c=calcVenda(v);const k=v.d+"|"+carDe(v);const x=gd[k]=gd[k]||{d:v.d,car:carDe(v),q:0,ponto:v.ponto};x.q+=c.q});
+  Object.values(gd).forEach(x=>{const com=x.q*taxaCom(grupoDia({d:x.d,carrinho:x.car}).q);ent.push({d:x.d,tipo:"dia",ponto:x.ponto,car:x.car,q:x.q,diaria:+par.diaria||0,com,cred:(+par.diaria||0)+com,deb:0})});
   d.movs.filter(m=>(m.t==="adiantamento"||m.t==="pagamento")&&m.d>=ini&&(m.vend||"v1")===vd.id).forEach(m=>ent.push({d:m.d,tipo:m.t,cred:0,deb:+m.v||0,obs:m.obs,id:m.id}));
   ent.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:(a.tipo==="dia"?-1:1));
   let s=+vd.saldoIni||0;ent.forEach(e=>{s+=e.cred-e.deb;e.saldo=s});
@@ -854,6 +983,7 @@ function mCad(){
     <div class="frow">${f("maqPct","Taxa maquininha (%)")}${f("darkPct","Comissão Dark (%)")}</div>
     ${f("fixosMes","Custos fixos mensais (R$)","Usado no ponto de equilíbrio. Não lance esses mesmos valores como despesa avulsa.")}
     ${f("alertaValidade","Avisar validade com quantos dias")}
+    <div class="frow">${f("gCorte","Peso de cada corte (g)")}${f("bCorte","Balas por corte")}</div>${f("pesoBala","Peso de cada bala (g)")}
     <button class="btn pri block" data-act="saveParams">Salvar parâmetros</button></div>`; }
   return h;
 }
@@ -872,7 +1002,7 @@ function mSync(){
     return backBtn()+`<div class="card pad"><div class="kv"><span>Conectado como</span><b>${esc(Store.user?Store.user.email:"–")}</b></div><div class="kv"><span>Situação</span><b>${Store.offline?"sem conexão":"sincronizando"}</b></div>
     <div class="divider"></div><h3 style="font-size:16px;margin-bottom:6px">Dar acesso a outra pessoa</h3>
     <p class="small muted" style="margin-top:0">1) No Supabase, crie o usuário dela (Authentication › Users › Add user) e inclua o e-mail na tabela <b>membros</b>. 2) Envie o link abaixo. Ela abre no Safari, instala na tela de início e entra com o e-mail e a senha.</p>
-    <button class="btn pri block" data-act="copiarConvite">Copiar link de acesso</button><div style="height:10px"></div><button class="btn block" data-act="logout">Sair desta conta</button></div>`;
+    <button class="btn pri block" data-act="copiarConvite">Copiar link de acesso</button><div style="height:10px"></div><button class="btn block" data-act="baixarConfig">Baixar config.js (para o GitHub)</button><p class="help" style="margin-top:6px">Suba este config.js no GitHub uma vez. Assim, quem instalar o app (Android ou iPhone) já entra direto na tela de login, sem colar URL e chave.</p><div style="height:10px"></div><button class="btn block" data-act="logout">Sair desta conta</button></div>`;
   }
   band("Sincronização","Hoje os dados ficam só neste aparelho");
   return backBtn()+`<div class="card pad"><p style="margin-top:0">Para compartilhar os dados com outra pessoa em tempo real, conecte o app ao seu projeto Supabase (passo a passo no LEIA-ME). Cole abaixo os dois valores de Project Settings › API.</p>
@@ -1161,6 +1291,7 @@ function formAcesso(email){
 /* ================= Modo vendedora ================= */
 const TABS_V=[["vender","Vender",'<path d="M5 7h14l-1.4 11.2a1 1 0 0 1-1 .8H7.4a1 1 0 0 1-1-.8zM9 7a3 3 0 0 1 6 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>'],
 ["estoque","Estoque",'<path d="M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>'],
+["receber","A receber",'<path d="M4 7h16v10H4zM4 11h16M8 15h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>'],
 ["agenda","Agenda",'<rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 10h16M9 3v4M15 3v4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>']];
 const PV=()=>Store.painel||{produtos:[],estoque:{},pontos:[],escala:[],carrinho:{nome:"Carrinho"},vendedora:""};
 const minhasVendas=()=>Object.values(Store.vv||{}).filter(v=>v.carrinho===Store.carrinho).sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0);
@@ -1171,16 +1302,16 @@ const totV=v=>{let q=0,r=0;(v.itens||[]).forEach(i=>{const p=prodV(i.p);const pr
 function bandV(title,sub,extra){ $("#band").innerHTML=`<div class="brandline"><div class="who"><img class="logo" src="${LOGO}" alt="Vai ter brigadeiro! Balas gourmet"></div><div class="tools"><span class="pill-sync">${esc(PV().carrinho.nome||"Carrinho")}</span><button class="ico-btn" data-act="logout" aria-label="Sair" title="Sair"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h4a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-4M10 16l-4-4 4-4M6 12h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div><h1>${title}</h1>${sub?`<div class="sub">${sub}</div>`:""}${extra||""}` }
 function renderVend(){
   UI.vtab=UI.vtab||"vender";
-  $("#tabs").style.gridTemplateColumns="repeat(3,1fr)";$("#tabs").innerHTML=TABS_V.map(([k,l,ic])=>`<button data-act="vtab" data-k="${k}" ${UI.vtab===k?'aria-current="page"':""}><svg viewBox="0 0 24 24" aria-hidden="true">${ic}</svg>${l}</button>`).join("");
+  $("#tabs").style.gridTemplateColumns="repeat(4,1fr)";$("#tabs").innerHTML=TABS_V.map(([k,l,ic])=>`<button data-act="vtab" data-k="${k}" ${UI.vtab===k?'aria-current="page"':""}><svg viewBox="0 0 24 24" aria-hidden="true">${ic}</svg>${l}</button>`).join("");
   if(!Store.carrinho){ bandV("Acesso sem carrinho",""); $("#view").innerHTML=`<div class="card empty"><h3>Seu acesso ainda não tem carrinho</h3><p>Peça ao responsável para vincular seu e-mail a um carrinho.</p><button class="btn pri" data-act="recarregar">Recarregar</button></div>`; return }
   if(!Store.painel){ bandV("Aguardando dados",""); $("#view").innerHTML=`<div class="card empty"><h3>O carrinho ainda não foi publicado</h3><p>Peça ao responsável para abrir o app dele uma vez. Os produtos, o estoque e a agenda aparecem aqui sozinhos.</p><button class="btn pri" data-act="recarregar">Recarregar</button></div>`; return }
-  $("#view").innerHTML=({vender:vVender,estoque:vEstoqueV,agenda:vAgenda})[UI.vtab]();
+  $("#view").innerHTML=({vender:vVender,estoque:vEstoqueV,agenda:vAgenda,receber:vReceber})[UI.vtab]();
 }
 function vVender(){
   const P=PV(),hoje=isoToday();const ag=(P.escala||[]).find(x=>x.d===hoje);const vs=minhasVendas();const hj=vs.filter(v=>v.d===hoje);
   let q=0,rr=0;hj.forEach(v=>{const t=totV(v);q+=t.q;rr+=t.r});
   bandV("Olá"+(P.vendedora?", "+esc(P.vendedora):""),(wd(hoje)+", "+fmtD(hoje)),`<div class="hero"><div><div class="big num">${R(rr)}</div><div class="lbl">vendido hoje</div></div><div class="mini"><div><span class="num">${q}</span><div class="lbl">unidades</div></div></div></div>`);
-  let h=`<div class="card pad" style="margin-bottom:12px">${ag?`<div class="small muted">Seu ponto hoje</div><div style="font-family:var(--fd);font-weight:700;font-size:20px">${esc(ag.nome)}</div><div class="small muted">${esc(ag.end)}</div>`:`<div class="small muted">Sem ponto agendado para hoje.</div>`}</div>
+  let h=cardInstalar(1)+`<div class="card pad" style="margin-bottom:12px">${ag?`<div class="small muted">Seu ponto hoje</div><div style="font-family:var(--fd);font-weight:700;font-size:20px">${esc(ag.nome)}</div><div class="small muted">${esc(ag.end)}</div>`:`<div class="small muted">Sem ponto agendado para hoje.</div>`}</div>
   <button class="btn pri block" data-act="novaVendaV" style="min-height:56px;font-size:18px">Nova venda</button>`;
   const dias={};vs.filter(v=>v.d>=addDays(hoje,-14)).forEach(v=>(dias[v.d]=dias[v.d]||[]).push(v));
   h+=`<div class="sec"><h2>Minhas vendas</h2></div>`;
@@ -1192,6 +1323,25 @@ function vEstoqueV(){
   bandV("Estoque do carrinho",esc(P.carrinho.nome),`<div class="hero"><div><div class="big num">${tot}</div><div class="lbl">unidades no carrinho</div></div></div>`);
   return `<div class="card tbl-wrap"><table><thead><tr><th>Produto</th><th>No carrinho</th><th>Preço</th></tr></thead><tbody>${prods.map(p=>{const q=estV(p.id);return `<tr><td>${esc(nomeV(p))}</td><td class="num ${q<=0?"neg":""}">${q}</td><td class="num">${R(p.preco)}</td></tr>`}).join("")}</tbody></table></div>
   <p class="help" style="margin-top:8px">Atualiza sozinho quando você lança uma venda ou quando o responsável abastece o carrinho. Última atualização do responsável: ${P.atualizado?fmtD(P.atualizado.slice(0,10))+" "+P.atualizado.slice(11,16).replace(":","h"):"–"} (UTC). Se a contagem física não bater, avise o responsável.</p>`;
+}
+function ledgerV(){
+  const P=PV(),R0=P.receber;if(!R0)return null;const g={};
+  (R0.dias||[]).forEach(x=>{const k=x.d+"|"+x.car;g[k]={d:x.d,car:x.car,q:+x.q||0,ponto:x.ponto}});
+  const pn=id=>((P.pontos||[]).find(p=>p.id===id)||(P.escala||[]).find(x=>x.ponto===id)||{}).nome||"";
+  minhasVendas().filter(v=>v.d>=R0.inicio&&!v.semVendedora&&(!v.vendedora||v.vendedora===R0.vid)).forEach(v=>{const k=v.d+"|"+v.carrinho;const x=g[k]=g[k]||{d:v.d,car:v.carrinho,q:0,ponto:pn(v.ponto)};x.q+=(v.itens||[]).reduce((s,i)=>s+(+i.v||0),0);if(!x.ponto)x.ponto=pn(v.ponto)});
+  const ent=Object.values(g).map(x=>{const t=x.q>=R0.metaCom?R0.comAlta:R0.comBaixa;const com=x.q*t;return {d:x.d,tipo:"dia",ponto:x.ponto,q:x.q,diaria:R0.diaria,com,cred:R0.diaria+com,deb:0}}).concat((R0.descontos||[]).map(m=>({d:m.d,tipo:m.t,obs:m.obs,cred:0,deb:m.v})));
+  ent.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:(a.tipo==="dia"?-1:1));let s=R0.saldoIni;ent.forEach(e=>{s+=e.cred-e.deb;e.saldo=s});return {ent,saldo:s,R0};
+}
+function vReceber(){
+  const L=ledgerV();if(!L){bandV("A receber","");return `<div class="card empty"><h3>Ainda sem informações</h3><p>Peça ao responsável para abrir o app dele uma vez.</p></div>`}
+  const ms=[...new Set(L.ent.map(e=>e.d.slice(0,7)))].sort();const m=UI.vrMes&&ms.includes(UI.vrMes)?UI.vrMes:(ms[ms.length-1]||isoToday().slice(0,7));
+  const ent=L.ent.filter(e=>e.d.slice(0,7)===m);let ant=L.R0.saldoIni;L.ent.filter(e=>e.d.slice(0,7)<m).forEach(e=>ant+=e.cred-e.deb);
+  const tot={q:0,dia:0,com:0,des:0,n:0};ent.forEach(e=>{if(e.tipo==="dia"){tot.q+=e.q;tot.dia+=e.diaria;tot.com+=e.com;tot.n++}else tot.des+=e.deb});
+  bandV("A receber",esc(L.R0.nome),`<div class="hero"><div><div class="big num">${R(L.saldo)}</div><div class="lbl">saldo a receber hoje</div></div></div>`);
+  return `<div class="chips">${ms.map(k=>`<button class="chip" data-act="vrMes" data-k="${k}" aria-pressed="${k===m}">${mesCurto(k)}</button>`).join("")}</div>
+  <div class="grid2" style="margin:8px 0">${kpi(R(ant),"saldo anterior")}${kpi(R(tot.dia),"diárias",tot.n+" dia(s)")}${kpi(R(tot.com),"comissões",tot.q+" un")}${kpi(R(tot.des),"adiantamentos e pagamentos")}</div>
+  <div class="card tbl-wrap"><table><thead><tr><th>Data</th><th>Un</th><th>Diária</th><th>Comissão</th><th>Recebido</th><th>Saldo</th></tr></thead><tbody>${ent.map(e=>`<tr><td>${fmtDM(e.d)} <span class="small muted">${e.tipo==="dia"?esc(e.ponto||""):e.tipo==="pagamento"?"Pagamento":"Adiantamento"}</span></td><td class="num">${e.tipo==="dia"?e.q:""}</td><td class="num">${e.tipo==="dia"?R(e.diaria):""}</td><td class="num">${e.tipo==="dia"?R(e.com):""}</td><td class="num">${e.deb?R(e.deb):""}</td><td class="num">${R(e.saldo)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">Sem lançamentos no mês.</td></tr>'}</tbody></table></div>
+  <p class="help" style="margin-top:8px">Diária de ${R(L.R0.diaria)} por dia trabalhado + comissão de ${R(L.R0.comAlta)} por unidade nos dias com ${L.R0.metaCom} ou mais unidades (${R(L.R0.comBaixa)} abaixo disso). Suas vendas de hoje já entram no cálculo. Adiantamentos e pagamentos aparecem quando o responsável lança. Dúvidas, fale com o responsável.</p>`;
 }
 function vAgenda(){
   const P=PV(),hoje=isoToday();const fim=(()=>{const t=dObj(hoje);return new Date(t.getFullYear(),t.getMonth()+2,0)})();const ate=fim.getFullYear()+"-"+pad(fim.getMonth()+1)+"-"+pad(fim.getDate());
@@ -1334,10 +1484,10 @@ const A={
     try{await saveMov(m,orig);if($("#cf-up").checked&&m.v>0){await saveCad(c=>{const x=c.insumos.find(y=>y.id===m.ins);x.preco=Math.round(m.v/qe*100)/100;if(m.f){x.cotacoes=(x.cotacoes||[]).filter(k=>k.f!==m.f);x.cotacoes.push({f:m.f,p:x.preco})}})}closeSheet();toast("Compra registrada.");render()}catch(e){}},
   saveContagem:async()=>{const dt=$("#ct-d").value||isoToday();const its=[];document.querySelectorAll("#ct-itens .itemrow").forEach(r=>{const v=numIn2(r.querySelector("input").value);if(v==null)return;const delta=v-(+r.dataset.cur||0);if(delta!==0)its.push({id:r.dataset.id,q:delta})});
     if(!its.length){toast("Nenhuma diferença para ajustar.");return}
-    try{ if(VF.tipo==="prod"){await saveMov({id:uid("m"),t:"ajusteProd",d:dt,loc:VF.loc,itens:its.map(i=>({p:i.id,q:i.q})),obs:"Contagem"})} else { const key="m-"+dt.slice(0,7);const doc=clone(Store.docs[key]||{itens:[]});its.forEach(i=>doc.itens.push({id:uid("m"),t:"ajusteIns",d:dt,ins:i.id,q:i.q,obs:"Contagem"}));await Store.save(key,doc)}
+    try{ if(VF.tipo==="massa"||VF.tipo==="balas"){ const key="m-"+dt.slice(0,7);const doc=clone(Store.docs[key]||{itens:[]});its.forEach(i=>doc.itens.push({id:uid("m"),t:VF.tipo==="massa"?"ajusteMassa":"ajusteBalas",d:dt,rec:i.id,q:i.q,obs:"Contagem"}));await Store.save(key,doc) } else if(VF.tipo==="prod"){await saveMov({id:uid("m"),t:"ajusteProd",d:dt,loc:VF.loc,itens:its.map(i=>({p:i.id,q:i.q})),obs:"Contagem"})} else { const key="m-"+dt.slice(0,7);const doc=clone(Store.docs[key]||{itens:[]});its.forEach(i=>doc.itens.push({id:uid("m"),t:"ajusteIns",d:dt,ins:i.id,q:i.q,obs:"Contagem"}));await Store.save(key,doc)}
       closeSheet();toast("Contagem salva.");render()}catch(e){}},
   editMov:e=>{const m=D().movs.find(x=>x.id===e.dataset.id);if(!m)return;
-    if(m.t==="producao")openProducao(m);else if(m.t==="envio"||m.t==="transf")openTransf(m);else if(m.t==="compra")openCompra(m);else if(m.t==="despesa")formDespesa(m);else if(m.t==="adiantamento"||m.t==="pagamento")formAdiant(m);
+    if(m.t==="massa")openMassa(m);else if(m.t==="corte")openCorte(m);else if(m.t==="embalagem")openEmbalar(m);else if(m.t==="producao")openProducao(m);else if(m.t==="envio"||m.t==="transf")openTransf(m);else if(m.t==="compra")openCompra(m);else if(m.t==="despesa")formDespesa(m);else if(m.t==="adiantamento"||m.t==="pagamento")formAdiant(m);
     else{ if(confirm("Excluir este ajuste de estoque?")) delMov(m).then(()=>{toast("Ajuste excluído.");render()}).catch(()=>{}) }},
   delMov:async()=>{if(!confirm("Excluir este movimento?"))return;try{await delMov(VF.mov);closeSheet();toast("Movimento excluído.");render()}catch(e){}},
   formDespesa:()=>formDespesa(),formAdiant:()=>formAdiant(),formEscala:e=>formEscala(e.dataset.d,e.dataset.c),vendSel:e=>{UI.vend=e.dataset.k;render()},formCar:e=>formCar(e.dataset.id),formVend:e=>formVend(e.dataset.id),formPonto:e=>formPonto(e.dataset.id),formIns:e=>formIns(e.dataset.id),formProd:e=>formProd(e.dataset.id),formRec:e=>formRec(e.dataset.id),
@@ -1357,7 +1507,21 @@ const A={
     try{ await navigator.clipboard.writeText(link); toast("Link copiado.") }catch(e){ prompt("Copie o link:",link) }},
   recarregar:()=>location.reload(),
   mpImport:()=>$("#mpIn").click(),
-  vtab:e=>{UI.vtab=e.dataset.k;window.scrollTo(0,0);render()},
+  instalarApp:async()=>{if(!_bip)return;_bip.prompt();try{await _bip.userChoice}catch(e){}_bip=null;render()},
+  baixarConfig:()=>{const c=Store.cfg;if(!c){toast("Conecte a nuvem primeiro.");return}saveFile("config.js",`/* Vai Ter Brigadeiro: conexão com o Supabase.
+   A chave "anon" é pública por natureza; os dados ficam protegidos pelo login e pelas regras de acesso. */
+window.VTB_CONFIG = {
+  url: ${JSON.stringify(c.url)},
+  key: ${JSON.stringify(c.key)}
+};
+`,"text/javascript")},
+  formMassa:()=>openMassa(),formCorte:()=>openCorte(),formEmbalar:()=>openEmbalar(),
+  saveMassa:async()=>{const m=readMassa();if(!m.rec||!m.n){toast("Informe sabor e número de receitas.");return}const r=D().recMap[m.rec];if(m.peso==null)m.peso=Math.round((+r.rend||0)*m.n/(+r.n||1));const orig=D().movs.find(x=>x.id===m.id);try{await saveMov(m,orig);closeSheet();toast("Produção registrada: "+N(m.peso)+" g de massa.");UI.tab="estoque";UI.estTab="producao";render()}catch(e){}},
+  corteTudo:e=>{$("#ct2-n").value=e.dataset.max;updCorte()},
+  saveCorte:async()=>{const m=readCorte();if(!m.cortes){toast("Informe o número de cortes.");return}if(m.g>VF.massaDisp+0.5&&!confirm("O corte usa mais massa do que a registrada. Salvar mesmo assim?"))return;const orig=D().movs.find(x=>x.id===m.id);try{await saveMov(m,orig);closeSheet();toast(m.balas+" balas cortadas.");UI.tab="estoque";UI.estTab="producao";render()}catch(e){}},
+  embSugerir:()=>{const m=readEmb();const sg=sugestaoEmb(m.rec,VF.disp,VF.H);document.querySelectorAll("#pf-itens .itemrow").forEach(r=>{const x=sg.rows.find(y=>y.p.id===r.dataset.p);r.querySelector('[data-f="v"]').value=x&&x.packs?x.packs:""});updEmb(true);toast("Sugestão aplicada. Ajuste se precisar.")},
+  saveEmbalar:async()=>{const m=readEmb();if(!m.itens.length){toast("Informe os pacotes.");return}const usa=m.itens.reduce((s,i)=>s+i.q*balasPack(D().prodMap[i.p]),0);if(usa>VF.disp+0.5&&!confirm("Vai usar mais balas do que há cortadas. Salvar mesmo assim?"))return;if(m.itens.some(i=>Object.values(i.dist||{}).reduce((s,x)=>s+(+x||0),0)>i.q)){toast("A divisão passou do total de algum produto.");return}if(m.dest==="dividir"&&!m.itens.some(i=>i.dist))m.dest="central";const orig=D().movs.find(x=>x.id===m.id);try{await saveMov(m,orig);closeSheet();toast("Embalagem registrada.");UI.tab="estoque";UI.estTab="producao";render()}catch(e){}},
+  vtab:e=>{UI.vtab=e.dataset.k;window.scrollTo(0,0);render()},vrMes:e=>{UI.vrMes=e.dataset.k;render()},
   novaVendaV:()=>openVendaV(),editVendaV:e=>{const v=Store.vv[e.dataset.id];if(v)openVendaV(v)},
   saveVendaV:async()=>{const v=readVendaV();if(!v.ponto){toast("Escolha o ponto.");return}if(!v.itens.length){toast("Informe o que foi vendido.");return}try{await Store.saveVV(v);closeSheet();toast("Venda salva.");render()}catch(e){}},
   delVendaV:async()=>{if(!confirm("Excluir esta venda?"))return;try{await Store.removeVV(VF.v.id);closeSheet();toast("Venda excluída.");render()}catch(e){}},
@@ -1374,10 +1538,15 @@ const A={
   exportCSV:()=>exportCSV(),exportJSON:()=>exportJSON(),importar:()=>$("#fileIn").click()
 };
 document.addEventListener("click",e=>{const a=e.target.closest("[data-act]");if(!a)return;if(a.tagName==="TR"&&e.target.closest("input,select"))return;const fn=A[a.dataset.act];if(fn){e.preventDefault();fn(a)}});
-document.addEventListener("input",e=>{if(!VF)return;if(e.target.closest("#sheet")){ if(VF.vendV) updVendaV(); else if(VF.v) updVendaSum(); else if(VF.mov&&VF.mov.t==="producao") updProd(!e.target.closest("#pf-dist")); else if(VF.mov&&VF.mov.t==="transf") updTransf(); }});
+document.addEventListener("input",e=>{if(!VF)return;if(e.target.closest("#sheet")){ if(VF.vendV) updVendaV(); else if(VF.v) updVendaSum(); else if(VF.mov&&VF.mov.t==="producao") updProd(!e.target.closest("#pf-dist")); else if(VF.mov&&VF.mov.t==="transf") updTransf(); else if(VF.mov&&VF.mov.t==="corte") updCorte(); else if(VF.mov&&VF.mov.t==="embalagem") updEmb(!e.target.closest("#pf-dist")); }});
 document.addEventListener("change",e=>{if(!VF)return;
   if(e.target.id==="tf-de"||e.target.id==="tf-para"){readTransf();drawTransf();return}
-  if(e.target.id==="ct-loc"){const v=e.target.value;if(v==="ins"){VF.tipo="ins"}else{VF.tipo="prod";VF.loc=v}VF.draw();return}
+  if(e.target.id==="ct-loc"){const v=e.target.value;if(v==="ins"||v==="massa"||v==="balas"){VF.tipo=v}else{VF.tipo="prod";VF.loc=v}VF.draw();return}
+  if(e.target.id==="ms-rec"){readMassa();const rr=D().recMap[VF.mov.rec];VF.mov.n=rr?rr.n:6;VF.mov.peso=null;drawMassa();return}
+  if(e.target.id==="ms-n"){readMassa();drawMassa();return}
+  if(e.target.id==="ct2-rec"){readCorte();VF.mov.cortes=0;drawCorte();return}
+  if(e.target.id==="em-rec"){readEmb();VF.mov.itens=[];VF.dist={};drawEmbalar();return}
+  if(e.target.id==="pf-dest"&&VF.mov&&VF.mov.t==="embalagem"){updEmb(true);return}
   if(e.target.id==="vf-car"){readVenda();const car=e.target.value;VF.v.carrinho=car;VF.v.vendedora=vendPadrao(car);const es=escalaDe(VF.v.d,car);VF.v.ponto=es?es.ponto:"";drawVenda();return}
   if(e.target.id==="vf-canal"){readVenda();VF.v.canal=e.target.value;if(isDark(VF.v.canal)){VF.v.ponto=VF.v.canal==="iFood"?"ifood":"dark-store"}else if(VF.v.canal==="Diretas"){VF.v.ponto="diretas"}VF.v.itens=[];drawVenda()}
   if(e.target.id==="pf-rec"){readProd();const r=D().recMap[VF.mov.rec];VF.mov.n=r?r.n:6;VF.mov.itens=[];drawProducao()}
