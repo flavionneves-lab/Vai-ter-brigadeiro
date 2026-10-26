@@ -334,14 +334,19 @@ function D(){
   const insMap={},prodMap={},pontoMap={},recMap={},recBySabor={};
   (cad.insumos||[]).forEach(i=>insMap[i.id]=i);(cad.produtos||[]).forEach(p=>prodMap[p.id]=p);(cad.pontos||[]).forEach(p=>pontoMap[p.id]=p);
   (cad.receitas||[]).forEach(r=>{recMap[r.id]=r;recBySabor[r.sabor]=r});
-  C={cad,par,vendas,movs,insMap,prodMap,pontoMap,recMap,recBySabor,escala:(docs.escala&&docs.escala.itens)||[],_cost:{}};
+  const precos={};(cad.insumos||[]).forEach(i=>{const ev=(i.precos||[]).map(x=>({d:x.d,p:+x.p,o:+x.ts||0}));movs.forEach(m=>{if(m.t==="compra"&&m.ins===i.id&&m.up!==false&&(+m.v||0)>0&&(+m.q||0)>0&&(+i.emb||0)>0){ev.push({d:m.d,p:Math.round((+m.v)/((+m.q)/(+i.emb))*100)/100,o:+m.ts||0})}});
+    ev.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:a.o-b.o);const base=i.precoBase!=null?+i.precoBase:(PRECO_ORIG[i.id]!=null?PRECO_ORIG[i.id]:(ev.length?ev[0].p:+i.preco||0));precos[i.id]={ev,base}});
+  C={cad,par,vendas,movs,insMap,prodMap,pontoMap,recMap,recBySabor,escala:(docs.escala&&docs.escala.itens)||[],_cost:{},precos};
   return C;
 }
+const PRECO_ORIG={"lc": 8, "creme": 20, "cacau100": 154.99, "manteiga": 30, "choc70": 333.99, "chocleite": 289.99, "chocbranco": 319.99, "glucose": 16.99, "glacucar": 4.49, "cacau50": 52.945, "cafe": 34.485, "ninho": 41.85, "doceleite": 24.72, "baileys": 150, "amarula": 150, "limoncello": 120, "fabbri": 299.99, "nesquik": 12.59, "whey": 240, "lcdiet": 30, "nutella": 51.99, "bueno": 39.99, "biscoff": 75.99, "kitkat": 28.99, "pouch90": 0.44, "pouch180": 0.57, "pote250": 6.65, "pote360": 6.93, "pote430": 7.49, "pet4": 2.69, "sacolapapel": 2620, "sacokraft": 312, "sacolatransp": 29.9, "adesivologo": 268.99, "adesivoqr": 220};
 const insUnit=i=>i&&i.emb?(+i.preco||0)/(+i.emb):0;
-function recCusto(r){const d=D();let lote=0;(r.itens||[]).forEach(it=>{lote+=(+it.q||0)*insUnit(d.insMap[it.ins])});lote*=(+r.n||1);return {lote,porG:r.rend?lote/r.rend:0}}
-function custoBala(p){ if(p.balaManual!=null&&p.balaManual!=="") return +p.balaManual; const r=D().recBySabor[p.sabor]; return r?recCusto(r).porG*(+p.peso||0):0 }
-function custoUnit(p,canal){ if(!p) return 0; const k=p.id+"|"+(isDark(canal)?"d":"c"); const cc=D()._cost; if(k in cc) return cc[k];
-  const v=custoBala(p)+insUnit(D().insMap[p.embIns])+(+p.adesivo||0)+(isDark(canal)?(+p.sacolaD||0):(+p.sacolaC||0)); cc[k]=v; return v }
+function precoEm(i,data){if(!i)return 0;if(!data)return +i.preco||0;const h=D().precos[i.id];if(!h||!h.ev.length)return +i.preco||0;let p=h.base;for(const e of h.ev){if(e.d<=data)p=e.p;else break}return p}
+const insUnitEm=(i,data)=>i&&i.emb?precoEm(i,data)/(+i.emb):0;
+function recCusto(r,data){const d=D();let lote=0;(r.itens||[]).forEach(it=>{lote+=(+it.q||0)*insUnitEm(d.insMap[it.ins],data)});lote*=(+r.n||1);return {lote,porG:r.rend?lote/r.rend:0}}
+function custoBala(p,data){ if(p.balaManual!=null&&p.balaManual!=="") return +p.balaManual; const r=D().recBySabor[p.sabor]; return r?recCusto(r,data).porG*(+p.peso||0):0 }
+function custoUnit(p,canal,data){ if(!p) return 0; const k=p.id+"|"+(isDark(canal)?"d":"c")+"|"+(data||""); const cc=D()._cost; if(k in cc) return cc[k];
+  const v=custoBala(p,data)+insUnitEm(D().insMap[p.embIns],data)+(+p.adesivo||0)+(isDark(canal)?(+p.sacolaD||0):(+p.sacolaC||0)); cc[k]=v; return v }
 const precoCanal=(p,c)=>isDark(c)?p.precoD:p.precoC;
 const prodNome=p=>p?p.sabor+" · "+p.emb.replace("Pouch ","").replace("Pote ","pote "):"Produto removido";
 const parCorte=()=>{const p=D().par;return {pesoBala:+p.pesoBala||6,gCorte:+p.gCorte||42,bCorte:+p.bCorte||7}};
@@ -355,7 +360,7 @@ function vendCalc(q){const p=D().par;return (+p.diaria||0)+q*(q>=(+p.metaCom||0)
 function calcVenda(v){
   const d=D(),par=d.par,pt=d.pontoMap[v.ponto]||{tipo:"",pct:0,fixo:0};
   let q=0,bruto=0,custo=0;const itens=[];
-  (v.itens||[]).forEach(it=>{const p=d.prodMap[it.p];const vend=+it.v||0;const pr=it.pr!=null&&it.pr!==""?+it.pr:(p?(+precoCanal(p,v.canal)||0):0);const cu=custoUnit(p,v.canal);q+=vend;bruto+=vend*pr;custo+=vend*cu;itens.push({p:it.p,q:vend,rec:vend*pr,custo:vend*cu})});
+  (v.itens||[]).forEach(it=>{const p=d.prodMap[it.p];const vend=+it.v||0;const pr=it.pr!=null&&it.pr!==""?+it.pr:(p?(+precoCanal(p,v.canal)||0):0);const cu=it.cu!=null&&it.cu!==""?+it.cu:custoUnit(p,v.canal,v.d);q+=vend;bruto+=vend*pr;custo+=vend*cu;itens.push({p:it.p,q:vend,rec:vend*pr,custo:vend*cu,cu})});
   const isCar=v.canal==="Carrinho";
   if(v.hist){const h=v.hist;const f=bruto>0?h.v/bruto:0;itens.forEach(i=>{i.rec*=f});
     const hl=h.l-(+v.mpTarifa||0);
@@ -389,7 +394,7 @@ function locais(){return [{id:"central",nome:"Cozinha"}].concat(carrinhos().map(
 const locNome=id=>{const l=locais().find(x=>x.id===id);return l?l.nome+(l.sub?" · "+l.sub:""):id};
 const sq=(e,id,loc)=>((e.prod[id]||{})[loc]||0);
 function pontosDoCar(car,extra){return D().cad.pontos.filter(p=>p.tipo!=="Online"&&(!p.car||p.car===car||p.id===extra))}
-const APP_VERSAO="23/10/2026 · produção em etapas + Android";
+const APP_VERSAO="26/10/2026 · custo pela data da venda";
 const saidaItem=i=>(i.l!=null&&i.r!=null)?Math.max(0,(+i.l||0)-(+i.r||0)):(+i.v||0);
 
 /* ---------- Estoque ---------- */
@@ -450,7 +455,8 @@ async function publicarPaineis(){
     const {error}=await Store.sb.from("painel_carrinho").upsert({carrinho:c.id,data,updated_at:data.atualizado});if(!error)_pubLast[c.id]=sig;
   }
 }
-async function gravarVenda(v,orig){ if(v.vv){ await Store.saveVV(v); return } if(orig&&orig.d.slice(0,7)!==v.d.slice(0,7)) await removeFromMonth("v-"+orig.d.slice(0,7),v.id); await upsertMonth("v-"+v.d.slice(0,7),v) }
+function congelarCusto(v){if(!v||v.hist)return v;const d=D();(v.itens||[]).forEach(i=>{const p=d.prodMap[i.p];if(p)i.cu=Math.round(custoUnit(p,v.canal,v.d)*10000)/10000});return v}
+async function gravarVenda(v,orig){ if(!orig||orig.d!==v.d||JSON.stringify(orig.itens||[])!==JSON.stringify(v.itens||[])||orig.canal!==v.canal) congelarCusto(v); else (v.itens||[]).forEach((i,k)=>{const o=(orig.itens||[])[k];if(o&&o.cu!=null&&i.cu==null)i.cu=o.cu}); if(v.vv){ await Store.saveVV(v); return } if(orig&&orig.d.slice(0,7)!==v.d.slice(0,7)) await removeFromMonth("v-"+orig.d.slice(0,7),v.id); await upsertMonth("v-"+v.d.slice(0,7),v) }
 async function apagarVenda(v){ if(v.vv) return Store.removeVV(v.id); return removeFromMonth("v-"+v.d.slice(0,7),v.id) }
 
 /* ================= Produção em etapas ================= */
@@ -795,7 +801,7 @@ function openCompra(m){
   <div class="frow"><label class="f"><span>Embalagens compradas</span><input inputmode="decimal" id="cf-qe" value="${mm.q&&i?fmtIn(mm.q/i.emb):""}"></label><label class="f"><span>Valor total (R$)</span><input inputmode="decimal" id="cf-v" value="${fmtIn(mm.v)}"></label></div>
   <div class="frow"><label class="f"><span>Data</span><input type="date" id="cf-d" value="${esc(mm.d)}"></label><label class="f"><span>Fornecedor</span><input id="cf-f" value="${esc(mm.f||"")}" list="cf-fl"></label></div>
   <datalist id="cf-fl">${[...new Set(d.cad.insumos.flatMap(x=>(x.cotacoes||[]).map(c=>c.f)))].map(f=>`<option value="${esc(f)}">`).join("")}</datalist>
-  <label class="check"><input type="checkbox" id="cf-up" checked> Atualizar o preço do cadastro (recalcula o custo dos produtos)</label>${VF.novo?"":`<button class="btn danger block" data-act="delMov">Excluir</button>`}`;
+  <label class="check"><input type="checkbox" id="cf-up" checked> Usar este preço a partir da data da compra (vendas anteriores mantêm o custo antigo)</label>${VF.novo?"":`<button class="btn danger block" data-act="delMov">Excluir</button>`}`;
   openSheet("Compra de insumo",b,`<button class="btn" data-act="closeSheet">Cancelar</button><button class="btn pri" style="flex:1" data-act="saveCompra">Salvar compra</button>`);
 }
 function openContagem(){
@@ -838,7 +844,7 @@ function anPontosRank(list){
 }
 function anItens(list){
   const d=D();const g={};let semDet=0,semDetQ=0;
-  list.forEach(v=>{const c=calcVenda(v);if(c.hist&&!c.detalhado){semDet++;semDetQ+=c.q;return}c.itens.forEach(i=>{const p=d.prodMap[i.p];const k=UI.itemAgr==="sabor"?(p?p.sabor:"?"):i.p;g[k]=g[k]||{q:0,rec:0,cus:0};g[k].q+=i.q;g[k].rec+=i.rec;g[k].cus+=i.q*custoUnit(p,v.canal)})});
+  list.forEach(v=>{const c=calcVenda(v);if(c.hist&&!c.detalhado){semDet++;semDetQ+=c.q;return}c.itens.forEach(i=>{const p=d.prodMap[i.p];const k=UI.itemAgr==="sabor"?(p?p.sabor:"?"):i.p;g[k]=g[k]||{q:0,rec:0,cus:0};g[k].q+=i.q;g[k].rec+=i.rec;g[k].cus+=i.custo})});
   const rows=Object.entries(g).map(([k,x])=>({k,nome:UI.itemAgr==="sabor"?k:prodNome(d.prodMap[k]),...x,mc:x.rec-x.cus})).filter(r=>r.q>0).sort((a,b)=>b.q-a.q);
   const tq=rows.reduce((s,r)=>s+r.q,0),tr=rows.reduce((s,r)=>s+r.rec,0),tm=rows.reduce((s,r)=>s+r.mc,0);
   let h=`<div class="seg" style="margin-top:12px">${[["produto","Por produto"],["sabor","Por sabor"]].map(([k,l])=>`<button data-act="itemAgr" data-k="${k}" aria-pressed="${UI.itemAgr===k}">${l}</button>`).join("")}</div>`;
@@ -970,7 +976,7 @@ function mCad(){
   let h=backBtn()+`<div class="seg">${[["produtos","Produtos"],["receitas","Receitas"],["insumos","Insumos"],["pontos","Pontos"],["carrinhos","Carrinhos"],["params","Parâmetros"]].map(([k,l])=>`<button data-act="cadTab" data-k="${k}" aria-pressed="${UI.cadTab===k}">${l}</button>`).join("")}</div><div style="height:12px"></div>`;
   const t=UI.cadTab;
   if(t==="produtos"){ h+=`<button class="btn pri block" data-act="formProd" style="margin-bottom:10px">Novo produto</button><div class="card tbl-wrap"><table><thead><tr><th>Produto</th><th>Preço carr.</th><th>Custo</th><th>Margem</th><th>Preço Dark</th><th>Margem Dark</th></tr></thead><tbody>${d.cad.produtos.map(p=>{const cc=custoUnit(p,"Carrinho"),cd=custoUnit(p,"Dark Store");const pc=+p.precoC||0,pd=+p.precoD||0;const mc=pc?(pc*(1-(10/100))-cc)/pc:0;const md=pd?(pd*(1-(+d.par.darkPct||0)/100)-cd)/pd:0;
-    return `<tr data-act="formProd" data-id="${esc(p.id)}" style="cursor:pointer${p.ativo?"":";opacity:.55"}"><td>${esc(prodNome(p))}${p.ativo?"":' <span class="tag">inativo</span>'}</td><td class="num">${pc?R(pc):"–"}</td><td class="num">${R(cc)}</td><td class="num">${pc?P(mc):"–"}</td><td class="num">${pd?R(pd):"–"}</td><td class="num">${pd?P(md):"–"}</td></tr>`}).join("")}</tbody></table></div><p class="help" style="margin-top:8px">Custo = massa (pela receita e preço atual dos insumos) + embalagem + adesivo + sacola. A margem do carrinho já desconta 10% de comissão de prédio; a da Dark desconta ${N(d.par.darkPct)}% de comissão.</p>`; }
+    return `<tr data-act="formProd" data-id="${esc(p.id)}" style="cursor:pointer${p.ativo?"":";opacity:.55"}"><td>${esc(prodNome(p))}${p.ativo?"":' <span class="tag">inativo</span>'}</td><td class="num">${pc?R(pc):"–"}</td><td class="num">${R(cc)}</td><td class="num">${pc?P(mc):"–"}</td><td class="num">${pd?R(pd):"–"}</td><td class="num">${pd?P(md):"–"}</td></tr>`}).join("")}</tbody></table></div><p class="help" style="margin-top:8px">Custo atual = massa (pela receita e preço mais recente dos insumos) + embalagem + adesivo + sacola. Cada venda usa o custo vigente na data dela; mudar preços não altera o lucro de vendas passadas. A margem do carrinho já desconta 10% de comissão de prédio; a da Dark desconta ${N(d.par.darkPct)}% de comissão.</p>`; }
   if(t==="carrinhos"){ h+=`<div class="sec" style="margin-top:0"><h2>Carrinhos</h2><button class="btn ghost act" data-act="formCar">+ Novo carrinho</button></div><div class="card"><div class="list">${carrinhos().map(c=>`<button class="row" data-act="formCar" data-id="${esc(c.id)}"><div class="main"><div class="t">${esc(c.nome)}</div><div class="s">Vendedora: ${esc(vendNome(c.vend))} · Caixa no MP: ${esc(c.caixa||"não definido")} · código <b>${esc(c.id)}</b></div></div></button>`).join("")}</div></div>
     <div class="sec"><h2>Vendedoras</h2><button class="btn ghost act" data-act="formVend">+ Nova vendedora</button></div><div class="card"><div class="list">${vendedoras().map(x=>`<button class="row" data-act="formVend" data-id="${esc(x.id)}"><div class="main"><div class="t">${esc(x.nome)}</div><div class="s">Controle desde ${fmtD(x.inicio)} · saldo inicial ${R(x.saldoIni)}</div></div></button>`).join("")}</div></div>
     <p class="help" style="margin-top:8px">Todas as vendedoras seguem a mesma regra de diária e comissão (Parâmetros). O “Caixa no MP” é o nome do caixa da maquininha no relatório do Mercado Pago (ex.: QR #1); é assim que a importação separa os carrinhos.</p>`; }
@@ -1102,7 +1108,7 @@ async function mpAplicar(){
     if(old)(old.itens||[]).forEach(oi=>{const ni=itens.find(i=>i.p===oi.p);if(ni){if(oi.l!=null)ni.l=oi.l;if(oi.r!=null)ni.r=oi.r}else if(oi.l!=null)itens.push({p:oi.p,v:0,l:oi.l,r:oi.r})});
     const v=Object.assign(old||{},{id,d:a.d,canal:"Carrinho",carrinho:a.car,estLoc:a.car,vendedora:(old&&old.vendedora)||vendPadrao(a.car),ponto,itens,maq:mp.t,mp,obs:"Importado do Mercado Pago"});
     const extra=Math.round((a.r-itens.reduce((s,i)=>s+i.v*(i.pr!=null?i.pr:+(d.prodMap[i.p].precoC)||0),0))*100)/100; v.ajuste=Math.abs(extra)>=1?extra:null;
-    if(!old)doc.itens.push(v);novos++;});
+    congelarCusto(v);if(!old)doc.itens.push(v);novos++;});
   if(falta&&!confirm(falta+" dia(s) novo(s) sem ponto escolhido serão ignorados. Continuar?"))return;
   try{ await saveCad(c=>{c.mpMap=map;if(Object.keys(caixaNova).length){const l=clone(carrinhos());Object.entries(caixaNova).forEach(([cx,car])=>{const cc=l.find(y=>y.id===car);if(cc&&!cc.caixa)cc.caixa=cx});c.carrinhos=l;if(!c.vendedoras)c.vendedoras=clone(vendedoras())}});
     for(const [k,doc] of Object.entries(porMes)) await Store.save(k,doc);
@@ -1162,7 +1168,7 @@ function shVendas(list){const d=D();const rows=[["Data","Dia","Canal","Carrinho"
   list.forEach(v=>{const c=calcVenda(v),p=d.pontoMap[v.ponto];const car=v.canal==="Carrinho";rows.push([fmtD(v.d),wd(v.d),v.canal,car?carNome(carDe(v)):"",car?vendNome(vendDe(v)):"",p?p.nome:"",p?p.tipo:"",c.q,r2(c.receita),c.hist?"":r2(c.custoProd),r2(c.predio||0),r2(c.vendedora||0),c.hist?r2(c.mpTarifa||0):r2(c.maq||0),c.hist?"":r2(c.plat||0),r2(c.lucro),c.receita?r2(c.lucro/c.receita):0,v.mp?r2(v.mp.r):"",v.mp&&car?r2(c.receita-v.mp.r):"",c.hist?"Planilha":(v.mp&&String(v.id).startsWith("mp")?"Mercado Pago":"App"),v.obs||""])});
   return {nome:"Vendas",rows}}
 function shItens(list){const d=D();const rows=[["Data","Canal","Carrinho","Ponto","Produto","Sabor","Embalagem","Levou","Vendeu","Voltou","Perdas","Receita","Custo unit.","Margem contribuição"]];
-  list.forEach(v=>{const c=calcVenda(v),p=d.pontoMap[v.ponto];const im={};(v.itens||[]).forEach(i=>im[i.p]=i);c.itens.forEach(i=>{const pr=d.prodMap[i.p];const o=im[i.p]||{};const cu=custoUnit(pr,v.canal);const volta=o.l!=null?(o.r!=null?+o.r:Math.max(0,o.l-i.q)):"";
+  list.forEach(v=>{const c=calcVenda(v),p=d.pontoMap[v.ponto];const im={};(v.itens||[]).forEach(i=>im[i.p]=i);c.itens.forEach(i=>{const pr=d.prodMap[i.p];const o=im[i.p]||{};const cu=i.cu!=null?i.cu:custoUnit(pr,v.canal,v.d);const volta=o.l!=null?(o.r!=null?+o.r:Math.max(0,o.l-i.q)):"";
     rows.push([fmtD(v.d),v.canal,v.canal==="Carrinho"?carNome(carDe(v)):"",p?p.nome:"",prodNome(pr),pr?pr.sabor:"",pr?pr.emb:"",o.l??"",i.q,volta,o.l!=null?Math.max(0,o.l-i.q-volta):"",r2(i.rec),r2(cu),r2(i.rec-i.q*cu)])})});
   return {nome:"Itens vendidos",rows}}
 function shPontos(list){const d=D();const ids=[...new Set(list.filter(v=>v.canal==="Carrinho").map(v=>v.ponto))];const rows=[["Ponto","Tipo","Endereço","Visitas","Unidades","Receita","Lucro","Margem","Un/visita","Receita/visita","Lucro/visita","Produto mais vendido","Última visita"]];
@@ -1170,7 +1176,7 @@ function shPontos(list){const d=D();const ids=[...new Set(list.filter(v=>v.canal
   return {nome:"Pontos",rows}}
 function shPontoProd(list){const d=D();const ids=[...new Set(list.filter(v=>v.canal==="Carrinho").map(v=>v.ponto))];const rows=[["Ponto","Produto","Unidades","Mix no ponto","Média por visita","Frequência (visitas com venda)","Sugestão levar","Receita"]];
   ids.forEach(id=>{const x=pontoProdutos(list,id);const p=d.pontoMap[id]||{};x.prods.forEach(r=>rows.push([p.nome||"?",prodNome(r.p),r.q,r2(r.share),r2(r.pv),r2(r.freq),r.levar,r2(r.rec)]))});return {nome:"Produtos por ponto",rows}}
-function shProdutosVend(list){const d=D();const g={};list.forEach(v=>{const c=calcVenda(v);if(c.hist&&!c.detalhado)return;c.itens.forEach(i=>{const pr=d.prodMap[i.p];g[i.p]=g[i.p]||{q:0,rec:0,cus:0};g[i.p].q+=i.q;g[i.p].rec+=i.rec;g[i.p].cus+=i.q*custoUnit(pr,v.canal)})});
+function shProdutosVend(list){const d=D();const g={};list.forEach(v=>{const c=calcVenda(v);if(c.hist&&!c.detalhado)return;c.itens.forEach(i=>{const pr=d.prodMap[i.p];g[i.p]=g[i.p]||{q:0,rec:0,cus:0};g[i.p].q+=i.q;g[i.p].rec+=i.rec;g[i.p].cus+=i.custo})});
   const tq=Object.values(g).reduce((s,x)=>s+x.q,0);const rows=[["Produto","Unidades","Mix","Receita","Margem contribuição","Margem %"]];Object.entries(g).sort((a,b)=>b[1].q-a[1].q).forEach(([id,x])=>rows.push([prodNome(d.prodMap[id]),x.q,tq?r2(x.q/tq):0,r2(x.rec),r2(x.rec-x.cus),x.rec?r2((x.rec-x.cus)/x.rec):0]));return {nome:"Produtos",rows}}
 function shDias(list){const g={};list.forEach(v=>{const c=calcVenda(v);g[v.d]=g[v.d]||{q:0,rec:0,luc:0};g[v.d].q+=c.q;g[v.d].rec+=c.receita;g[v.d].luc+=c.lucro});const rows=[["Data","Dia","Unidades","Receita","Lucro","Margem"]];
   Object.keys(g).sort().forEach(k=>rows.push([fmtD(k),wd(k),g[k].q,r2(g[k].rec),r2(g[k].luc),g[k].rec?r2(g[k].luc/g[k].rec):0]));return {nome:"Por dia",rows}}
@@ -1414,7 +1420,7 @@ function formPonto(id){const d=D();const p=id?d.pontoMap[id]:{id:uid("p"),nome:"
 function formIns(id){const d=D();const i=id?d.insMap[id]:{id:uid("i"),nome:"",marca:"",tipo:"ingrediente",unid:"g",emb:1000,preco:0,minimo:0,cotacoes:[]};
   const cot=(i.cotacoes||[]).length?`<div class="card pad small" style="margin-bottom:12px"><b>Cotações registradas</b>${i.cotacoes.map(c=>`<div class="kv"><span>${esc(c.f)}</span><b class="num">${R(c.p)}</b></div>`).join("")}</div>`:"";
   formGeneric(id?"Editar insumo":"Novo insumo",[{k:"nome",l:"Nome",v:i.nome},{k:"marca",l:"Marca",v:i.marca},{k:"tipo",l:"Tipo",type:"select",v:i.tipo,opts:[["ingrediente","Ingrediente"],["embalagem","Embalagem"]]},{k:"unid",l:"Unidade de controle",type:"select",v:i.unid,opts:[["g","gramas (g)"],["ml","mililitros (ml)"],["un","unidades"]]},{k:"emb",l:"Quantidade por embalagem",num:1,v:i.emb},{k:"preco",l:"Preço da embalagem (R$)",num:1,v:i.preco},{k:"minimo",l:"Estoque mínimo (na unidade de controle)",num:1,v:i.minimo},{type:"html",html:cot}],
-  async x=>{if(!x.nome||!x.emb){toast("Informe nome e quantidade por embalagem.");return false}await saveCad(c=>{const k=c.insumos.findIndex(y=>y.id===i.id);const n=Object.assign({},i,x,{preco:x.preco||0,minimo:x.minimo||0});if(k>=0)c.insumos[k]=n;else c.insumos.push(n)});toast("Insumo salvo.")},
+  async x=>{if(!x.nome||!x.emb){toast("Informe nome e quantidade por embalagem.");return false}await saveCad(c=>{const k=c.insumos.findIndex(y=>y.id===i.id);const n=Object.assign({},i,x,{preco:x.preco||0,minimo:x.minimo||0});if(k>=0&&(+i.preco||0)!==(+n.preco||0)){if(n.precoBase==null)n.precoBase=PRECO_ORIG[n.id]!=null?PRECO_ORIG[n.id]:(+i.preco||0);n.precos=(i.precos||[]).concat([{d:isoToday(),p:+n.preco||0,ts:Date.now()}])}if(k>=0)c.insumos[k]=n;else c.insumos.push(n)});toast((+i.preco||0)!==(+x.preco||0)&&id?"Insumo salvo. O novo preço vale para vendas a partir de hoje.":"Insumo salvo.")},
   id&&!d.cad.receitas.some(r=>r.itens.some(t=>t.ins===id))&&!d.cad.produtos.some(p=>p.embIns===id)?async()=>{await saveCad(c=>{c.insumos=c.insumos.filter(y=>y.id!==id)});toast("Insumo excluído.")}:null)}
 function formProd(id){const d=D();const p=id?d.prodMap[id]:{id:uid("p"),sabor:"",emb:"Pouch 90 g",peso:90,precoC:25,precoD:27,embIns:"pouch90",adesivo:.49,sacolaC:2.62,sacolaD:.62,balaManual:null,ativo:true};
   const r=d.recBySabor[p.sabor];const info=`<div class="card pad small" style="margin-bottom:12px"><div class="kv"><span>Custo da massa</span><b class="num">${R(custoBala(p))}</b></div><div class="kv"><span>Custo total carrinho</span><b class="num">${R(custoUnit(p,"Carrinho"))}</b></div><div class="kv"><span>Custo total Dark</span><b class="num">${R(custoUnit(p,"Dark Store"))}</b></div>${r?"":'<span class="muted">Sem receita cadastrada para este sabor: informe o custo da massa manualmente.</span>'}</div>`;
@@ -1480,8 +1486,8 @@ const A={
   contTipo:e=>{const k=e.dataset.k;VF.tipo=k==="ins"?"ins":"prod";VF.loc=k==="dark"?"dark":"central";VF.draw()},
   saveProducao:async()=>{const m=readProd();if(!m.n||!m.rec){toast("Informe sabor e número de receitas.");return}if(m.itens.some(i=>Object.values(i.dist||{}).reduce((s,x)=>s+(+x||0),0)>i.q)){toast("A divisão passou do total produzido em algum produto.");return}if(m.dest==="dividir"&&!m.itens.some(i=>i.dist))m.dest="central";const orig=D().movs.find(x=>x.id===m.id);try{await saveMov(m,orig);closeSheet();toast("Produção registrada.");render()}catch(e){}},
   saveEnvio:async()=>{const m=VF.mov;m.d=$("#ef-d").value;m.validade=$("#ef-val").value;m.obs=$("#ef-obs").value;m.itens=[];document.querySelectorAll("#ef-itens .itemrow").forEach(r=>{const q=numIn2(r.querySelector('[data-f="v"]').value)||0;if(q>0)m.itens.push({p:r.dataset.p,q})});if(!m.itens.length){toast("Informe as quantidades enviadas.");return}const orig=D().movs.find(x=>x.id===m.id);try{await saveMov(m,orig);closeSheet();toast("Envio registrado.");render()}catch(e){}},
-  saveCompra:async()=>{const d=D(),m=VF.mov;m.ins=$("#cf-ins").value;const i=d.insMap[m.ins];const qe=numIn2($("#cf-qe").value)||0;m.v=numIn2($("#cf-v").value)||0;m.q=qe*(+i.emb||1);m.d=$("#cf-d").value;m.f=$("#cf-f").value;if(!qe){toast("Informe a quantidade.");return}const orig=d.movs.find(x=>x.id===m.id);
-    try{await saveMov(m,orig);if($("#cf-up").checked&&m.v>0){await saveCad(c=>{const x=c.insumos.find(y=>y.id===m.ins);x.preco=Math.round(m.v/qe*100)/100;if(m.f){x.cotacoes=(x.cotacoes||[]).filter(k=>k.f!==m.f);x.cotacoes.push({f:m.f,p:x.preco})}})}closeSheet();toast("Compra registrada.");render()}catch(e){}},
+  saveCompra:async()=>{const d=D(),m=VF.mov;m.ins=$("#cf-ins").value;const i=d.insMap[m.ins];const qe=numIn2($("#cf-qe").value)||0;m.v=numIn2($("#cf-v").value)||0;m.q=qe*(+i.emb||1);m.d=$("#cf-d").value;m.f=$("#cf-f").value;m.up=$("#cf-up").checked;if(!m.ts)m.ts=Date.now();if(!qe){toast("Informe a quantidade.");return}const orig=d.movs.find(x=>x.id===m.id);
+    try{await saveMov(m,orig);if($("#cf-up").checked&&m.v>0){await saveCad(c=>{const x=c.insumos.find(y=>y.id===m.ins);if(x.precoBase==null)x.precoBase=PRECO_ORIG[x.id]!=null?PRECO_ORIG[x.id]:x.preco;if(m.d>=(D().precos[x.id]&&D().precos[x.id].ev.length?D().precos[x.id].ev[D().precos[x.id].ev.length-1].d:"")||!D().precos[x.id]||!D().precos[x.id].ev.length)x.preco=Math.round(m.v/qe*100)/100;if(m.f){x.cotacoes=(x.cotacoes||[]).filter(k=>k.f!==m.f);x.cotacoes.push({f:m.f,p:x.preco})}})}closeSheet();toast("Compra registrada.");render()}catch(e){}},
   saveContagem:async()=>{const dt=$("#ct-d").value||isoToday();const its=[];document.querySelectorAll("#ct-itens .itemrow").forEach(r=>{const v=numIn2(r.querySelector("input").value);if(v==null)return;const delta=v-(+r.dataset.cur||0);if(delta!==0)its.push({id:r.dataset.id,q:delta})});
     if(!its.length){toast("Nenhuma diferença para ajustar.");return}
     try{ if(VF.tipo==="massa"||VF.tipo==="balas"){ const key="m-"+dt.slice(0,7);const doc=clone(Store.docs[key]||{itens:[]});its.forEach(i=>doc.itens.push({id:uid("m"),t:VF.tipo==="massa"?"ajusteMassa":"ajusteBalas",d:dt,rec:i.id,q:i.q,obs:"Contagem"}));await Store.save(key,doc) } else if(VF.tipo==="prod"){await saveMov({id:uid("m"),t:"ajusteProd",d:dt,loc:VF.loc,itens:its.map(i=>({p:i.id,q:i.q})),obs:"Contagem"})} else { const key="m-"+dt.slice(0,7);const doc=clone(Store.docs[key]||{itens:[]});its.forEach(i=>doc.itens.push({id:uid("m"),t:"ajusteIns",d:dt,ins:i.id,q:i.q,obs:"Contagem"}));await Store.save(key,doc)}
