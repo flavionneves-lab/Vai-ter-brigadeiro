@@ -396,7 +396,7 @@ function locais(){return [{id:"central",nome:"Cozinha"}].concat(carrinhos().map(
 const locNome=id=>{const l=locais().find(x=>x.id===id);return l?l.nome+(l.sub?" · "+l.sub:""):id};
 const sq=(e,id,loc)=>((e.prod[id]||{})[loc]||0);
 function pontosDoCar(car,extra){return D().cad.pontos.filter(p=>p.tipo!=="Online"&&(!p.car||p.car===car||p.id===extra))}
-const APP_VERSAO="27/10/2026 · outra maquininha";
+const APP_VERSAO="27/10/2026 · conferir custos e taxas";
 const saidaItem=i=>(i.l!=null&&i.r!=null)?Math.max(0,(+i.l||0)-(+i.r||0)):(+i.v||0);
 
 /* ---------- Estoque ---------- */
@@ -931,7 +931,7 @@ function barChart(data){
 /* ================= Mais ================= */
 function vMais(){
   const sub=UI.maisSub;
-  if(sub) return ({iara:mIara,predios:mPredios,escala:mEscala,despesas:mDespesas,cad:mCad,backup:mBackup,sync:mSync,mp:mMP,acessos:mAcessos})[sub]();
+  if(sub) return ({iara:mIara,predios:mPredios,escala:mEscala,despesas:mDespesas,cad:mCad,backup:mBackup,sync:mSync,mp:mMP,acessos:mAcessos,conferir:mConferir})[sub]();
   band("Mais","Controles, cadastros e backup");
   const d=D(),vs=vendedoras(),ils=vs.map(x=>iaraLedger(x.id));
   return `<div class="menu-grid">
@@ -943,6 +943,7 @@ function vMais(){
   <button data-act="mais" data-k="cad"><b>Cadastros</b><span>Produtos, receitas, insumos, pontos, parâmetros</span></button>
   <button data-act="mais" data-k="backup"><b>Backup</b><span>Exportar e importar dados</span></button>
   <button data-act="mais" data-k="mp"><b>Mercado Pago</b><span>Importar vendas e tarifas da maquininha</span></button>
+  <button data-act="mais" data-k="conferir"><b>Conferir custos</b><span>Alinhar preços com a planilha e recalcular vendas</span></button>
   <button data-act="mais" data-k="acessos"><b>Acessos das vendedoras</b><span>Quem entra e em qual carrinho</span></button>
   <button data-act="mais" data-k="sync"><b>Sincronização</b><span>${Store.mode==="cloud"?"Conectado"+(Store.user?": "+esc(Store.user.email):""):"Compartilhar com outra pessoa"}</span></button></div>
   <div style="margin-top:14px">${cardInstalar()}</div><p class="help" style="text-align:center;margin-top:14px">Versão ${esc(APP_VERSAO)}</p>`;
@@ -1435,6 +1436,40 @@ function formVend(id){const v=id?vendedoras().find(x=>x.id===id):{id:"v"+Date.no
   formGeneric(id?"Editar vendedora":"Nova vendedora",[{k:"nome",l:"Nome",v:v.nome},{k:"inicio",l:"Controle desde",type:"date",v:v.inicio},{k:"saldoIni",l:"Saldo inicial a pagar (R$)",num:1,v:v.saldoIni}],
   async x=>{if(!x.nome){toast("Informe o nome.");return false}await saveCad(cad=>{const l=clone(vendedoras());const k=l.findIndex(y=>y.id===v.id);const n=Object.assign({},v,x,{saldoIni:x.saldoIni||0});if(k>=0)l[k]=n;else l.push(n);cad.vendedoras=l;if(!cad.carrinhos)cad.carrinhos=clone(carrinhos())});toast("Vendedora salva.")},
   id&&id!=="v1"&&!D().vendas.some(y=>y.canal==="Carrinho"&&vendDe(y)===id)?async()=>{await saveCad(cad=>{cad.vendedoras=clone(vendedoras()).filter(y=>y.id!==id)});toast("Vendedora excluída.")}:null)}
+const MQ_PLANILHA={"2026-10-20":14.88,"2026-10-21":27.67,"2026-10-22":30.2,"2026-10-23":9.64};
+function mConferir(){
+  const d=D();const corte=UI.cfCorte||"2026-10-24";const antes=addDays(corte,-1);
+  band("Conferir custos","Alinhar com a planilha de controle");
+  const ins=d.cad.insumos.filter(i=>PRECO_ORIG[i.id]!=null).map(i=>{const pa=precoEm(i,antes),po=PRECO_ORIG[i.id];return {i,po,pa,pn:+i.preco||0,dif:Math.abs(pa-po)>0.005}});
+  const sacOk=d.cad.produtos.filter(p=>Math.abs((+p.sacolaC||0)-1.2)<0.005||Math.abs((+p.sacolaC||0)-2.62)<0.005).every(p=>Math.abs((+valorEm(p,"sacolaC","2026-10-20")||0)-2.62)<0.005&&Math.abs((+valorEm(p,"sacolaC","2026-10-21")||0)-1.2)<0.005);
+  const ex=d.prodMap["70-cacau-pouch-90-g"];
+  let h=backBtn()+`<div class="card pad" style="margin-bottom:12px"><p style="margin-top:0">Use esta tela se o lucro do app não bater com a planilha antes da compra de insumos mais barata. Ela faz os preços da planilha valerem <b>até ${fmtD(antes)}</b> e os preços atuais <b>a partir de ${fmtD(corte)}</b>, e coloca a sacola do carrinho em R$ 2,62 até 20/10 e R$ 1,20 desde 21/10. Depois recalcula as vendas de outubro.</p>
+  <label class="f"><span>Novos preços de insumos valem a partir de</span><input type="date" id="cf-corte" value="${esc(corte)}"></label>
+  ${ex?`<div class="kv small"><span>Custo hoje do 70% Cacau 90 g em 20/10 · 22/10 · ${fmtDM(corte)}</span><b class="num">${R(custoUnit(ex,"Carrinho","2026-10-20"))} · ${R(custoUnit(ex,"Carrinho","2026-10-22"))} · ${R(custoUnit(ex,"Carrinho",corte))}</b></div><div class="kv small"><span>Na planilha</span><b class="num">R$ 8,98 · R$ 7,56 · –</b></div>`:""}</div>
+  <label class="check"><input type="checkbox" id="cf-sac" ${sacOk?"":"checked"}> Sacola do carrinho: R$ 2,62 até 20/10 e R$ 1,20 desde 21/10 ${sacOk?'<span class="tag c">já está assim</span>':'<span class="tag w">ajustar</span>'}</label>
+  <div class="card tbl-wrap"><table><thead><tr><th>Insumo</th><th>Planilha</th><th>App até ${fmtDM(antes)}</th><th>Atual</th><th>Usar planilha</th></tr></thead><tbody>${ins.map(x=>`<tr><td>${esc(x.i.nome)}</td><td class="num">${R(x.po)}</td><td class="num ${x.dif?"neg":""}">${R(x.pa)}</td><td class="num">${R(x.pn)}</td><td style="text-align:center"><input type="checkbox" data-cf="${esc(x.i.id)}" ${x.dif?"checked":""} style="width:20px;height:20px;accent-color:var(--accent)"></td></tr>`).join("")}</tbody></table></div>
+  ${(()=>{const ls=Object.entries(MQ_PLANILHA).map(([dd,mq])=>{const vs=d.vendas.filter(v=>v.canal==="Carrinho"&&!v.hist&&v.d===dd);if(!vs.length)return null;const atual=vs.reduce((t,v)=>t+((v.maq!=null&&v.maq!=="")?+v.maq:0)+(+v.maq2||0),0);return {dd,mq,atual,id:vs[0].id,dif:Math.abs(atual-mq)>0.005}}).filter(Boolean);
+    return ls.length?`<div class="sec"><h2 style="font-size:17px">Taxa da maquininha por dia</h2></div><div class="card tbl-wrap"><table><thead><tr><th>Dia</th><th>Planilha</th><th>App</th><th>Usar planilha</th></tr></thead><tbody>${ls.map(x=>`<tr><td>${fmtD(x.dd)}</td><td class="num">${R(x.mq)}</td><td class="num ${x.dif?"neg":""}">${R(x.atual)}</td><td style="text-align:center"><input type="checkbox" data-mq="${esc(x.dd)}" ${x.dif?"checked":""} style="width:20px;height:20px;accent-color:var(--accent)"></td></tr>`).join("")}</tbody></table></div><p class="help" style="margin-top:6px">Mercado Pago + outra maquininha, como na coluna “Mq Cartão” da planilha.</p>`:""})()}
+  <p class="help" style="margin-top:8px">Preços por embalagem. Em vermelho, insumos cujo preço no app antes de ${fmtD(corte)} é diferente da planilha. Compras e alterações anteriores a essa data deixam de mudar o custo (as compras continuam no estoque).</p>
+  <button class="btn pri block" data-act="cfAplicar">Aplicar e recalcular vendas de outubro</button>`;
+  return h;
+}
+async function cfAplicar(){
+  const corte=$("#cf-corte").value||"2026-10-24";const sel=[...document.querySelectorAll("[data-cf]")].filter(x=>x.checked).map(x=>x.dataset.cf);const sac=$("#cf-sac").checked;const mqs=[...document.querySelectorAll("[data-mq]")].filter(x=>x.checked).map(x=>x.dataset.mq);
+  if(!sel.length&&!sac&&!mqs.length){toast("Nada selecionado.");return}
+  if(!confirm(`Aplicar: ${sel.length} insumo(s) com preço da planilha até ${fmtD(addDays(corte,-1))}${sac?" e sacola 2,62/1,20":""}, e recalcular as vendas de outubro?`))return;
+  try{
+    const d=D();const movDocs={};
+    for(const id of sel){d.movs.filter(m=>m.t==="compra"&&m.ins===id&&m.d<corte&&m.up!==false).forEach(m=>{const k="m-"+m.d.slice(0,7);movDocs[k]=movDocs[k]||clone(Store.docs[k]||{itens:[]});const x=movDocs[k].itens.find(y=>y.id===m.id);if(x)x.up=false})}
+    for(const [k,doc] of Object.entries(movDocs)) await Store.save(k,doc);
+    await saveCad(c=>{sel.forEach(id=>{const i=c.insumos.find(y=>y.id===id);if(!i)return;i.precoBase=PRECO_ORIG[id];i.precos=(i.precos||[]).filter(e=>e.d>=corte);const temDepois=i.precos.length||D().movs.some(m=>m.t==="compra"&&m.ins===id&&m.d>=corte&&m.up!==false);if(!temDepois&&Math.abs((+i.preco||0)-PRECO_ORIG[id])>0.005)i.precos.push({d:corte,p:+i.preco,ts:Date.now()})});
+      if(sac)c.produtos.forEach(p=>{const atual=+p.sacolaC||0;if(Math.abs(atual-1.2)>0.005&&Math.abs(atual-2.62)>0.005)return;p.vig=(p.vig||[]).filter(x=>x.campo!=="sacolaC");p.vig.push({campo:"sacolaC",d:"2026-10-21",v:1.2,ant:2.62,ts:Date.now()});p.sacolaC=1.2});
+      c.flags=Object.assign({},c.flags,{sac2110:true})});
+    const n=await recongelar("2026-10-01",null);
+    for(const dd of mqs){const vs=D().vendas.filter(v=>v.canal==="Carrinho"&&!v.hist&&v.d===dd);vs.forEach((v,k)=>{const nv=clone(v);if(k===0){nv.maq=Math.round((MQ_PLANILHA[dd]-(+nv.maq2||0))*100)/100}else{nv.maq=0}if(nv.vv)return Store.saveVV(nv);});const docK="v-"+dd.slice(0,7);const doc=clone(Store.docs[docK]||{itens:[]});let mud=false;vs.filter(v=>!v.vv).forEach((v,k)=>{const x=doc.itens.find(y=>y.id===v.id);if(!x)return;x.maq=k===0?Math.round((MQ_PLANILHA[dd]-(+x.maq2||0))*100)/100:0;mud=true});if(mud)await Store.save(docK,doc)}
+    UI.cfCorte=corte;toast(`Pronto: ${n} item(ns) de vendas recalculados.`);render();
+  }catch(e){toast("Não foi possível aplicar.")}
+}
 function formCustoMassa(){
   formGeneric("Alterar custo em vários produtos",[{k:"campo",l:"Qual custo",type:"select",v:"sacolaC",opts:[["sacolaC","Sacola carrinho"],["sacolaD","Sacola Dark"],["adesivo","Adesivo"]]},{k:"filtro",l:"Aplicar só nos produtos que hoje têm este valor (R$, vazio = todos)",num:1,v:null},{k:"novo",l:"Novo valor por unidade (R$)",num:1,v:null},{k:"desde",l:"Vale a partir de",type:"date",v:isoToday()},{type:"html",html:'<p class="help">As vendas a partir dessa data são recalculadas com o novo valor. As anteriores mantêm o custo antigo.</p>'}],
   async x=>{if(x.novo==null){toast("Informe o novo valor.");return false}const f=x.filtro;const res=await aplicarVigencia(x.campo,x.novo,x.desde||isoToday(),f==null?null:(p=>Math.abs((+p[x.campo]||0)-f)<0.005));toast(`${res.prods} produto(s) atualizado(s); ${res.itens} item(ns) de vendas recalculados.`)})}
@@ -1547,6 +1582,7 @@ const A={
   recarregar:()=>location.reload(),
   mpImport:()=>$("#mpIn").click(),
   formCustoMassa:()=>formCustoMassa(),
+  cfAplicar:()=>cfAplicar(),
   corrigirCont:async()=>{try{await saveCad(c=>{const p=c.pontos.find(x=>x.id==="continental-square");if(p)p.fixo=0;c.flags=Object.assign({},c.flags,{cont0:true})});toast("Continental Square agora sem valor fixo.");render()}catch(e){}},
   dispensarCont:async()=>{try{await saveCad(c=>{c.flags=Object.assign({},c.flags,{cont0:true})});render()}catch(e){}},
   aplicarSacola:async()=>{try{const res=await aplicarVigencia("sacolaC",1.2,"2026-10-21",p=>Math.abs((+p.sacolaC||0)-2.62)<0.005);await saveCad(c=>{c.flags=Object.assign({},c.flags,{sac2110:true})});toast(`Sacola R$ 1,20 desde 21/10 em ${res.prods} produto(s); ${res.itens} item(ns) de vendas recalculados.`);render()}catch(e){}},
@@ -1584,7 +1620,9 @@ window.VTB_CONFIG = {
 };
 document.addEventListener("click",e=>{const a=e.target.closest("[data-act]");if(!a)return;if(a.tagName==="TR"&&e.target.closest("input,select"))return;const fn=A[a.dataset.act];if(fn){e.preventDefault();fn(a)}});
 document.addEventListener("input",e=>{if(!VF)return;if(e.target.closest("#sheet")){ if(VF.vendV) updVendaV(); else if(VF.v) updVendaSum(); else if(VF.mov&&VF.mov.t==="producao") updProd(!e.target.closest("#pf-dist")); else if(VF.mov&&VF.mov.t==="transf") updTransf(); else if(VF.mov&&VF.mov.t==="corte") updCorte(); else if(VF.mov&&VF.mov.t==="embalagem") updEmb(!e.target.closest("#pf-dist")); }});
+document.addEventListener("change",e=>{if(e.target.id==="cf-corte"){UI.cfCorte=e.target.value;render();return}});
 document.addEventListener("change",e=>{if(!VF)return;
+  if(e.target.id==="cf-corte"){UI.cfCorte=e.target.value;render();return}
   if(e.target.id==="tf-de"||e.target.id==="tf-para"){readTransf();drawTransf();return}
   if(e.target.id==="ct-loc"){const v=e.target.value;if(v==="ins"||v==="massa"||v==="balas"){VF.tipo=v}else{VF.tipo="prod";VF.loc=v}VF.draw();return}
   if(e.target.id==="ms-rec"){readMassa();const rr=D().recMap[VF.mov.rec];VF.mov.n=rr?rr.n:6;VF.mov.peso=null;drawMassa();return}
