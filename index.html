@@ -371,7 +371,7 @@ function calcVenda(v){
   const receita=bruto+(+v.ajuste||0);
   let predio=0,vend=0,maq=0,plat=0;
   if(isCar){ const g=grupoDia(v); if(pt.tipo==="Prédio"&&q>0) predio=bruto*(+pt.pct||0)/100+(g.leadP[v.ponto]===v.id?(+pt.fixo||0):0); if(!v.semVendedora) vend=(g.leadV===v.id?(+par.diaria||0):0)+q*taxaCom(g.q); }
-  if(!isDark(v.canal)) maq=(v.maq!=null&&v.maq!=="")?+v.maq:receita*(+par.maqPct||0)/100;
+  if(!isDark(v.canal)) maq=((v.maq!=null&&v.maq!=="")?+v.maq:receita*(+par.maqPct||0)/100)+(+v.maq2||0);
   if(isDark(v.canal)) plat=receita*(+par.darkPct||0)/100+(+v.descPlat||0);
   const lucro=receita-custo-predio-vend-maq-plat;
   return {q,receita,bruto,custoProd:custo,predio,vendedora:vend,comissaoVend:isCar&&!v.semVendedora?q*taxaCom(grupoDia(v).q):0,maq,plat,lucro,custo:receita-lucro,itens,detalhado:true};
@@ -396,7 +396,7 @@ function locais(){return [{id:"central",nome:"Cozinha"}].concat(carrinhos().map(
 const locNome=id=>{const l=locais().find(x=>x.id===id);return l?l.nome+(l.sub?" · "+l.sub:""):id};
 const sq=(e,id,loc)=>((e.prod[id]||{})[loc]||0);
 function pontosDoCar(car,extra){return D().cad.pontos.filter(p=>p.tipo!=="Online"&&(!p.car||p.car===car||p.id===extra))}
-const APP_VERSAO="26/10/2026 · conferência com a planilha";
+const APP_VERSAO="27/10/2026 · outra maquininha";
 const saidaItem=i=>(i.l!=null&&i.r!=null)?Math.max(0,(+i.l||0)-(+i.r||0)):(+i.v||0);
 
 /* ---------- Estoque ---------- */
@@ -679,7 +679,7 @@ function drawVenda(){
   b+=`</div>`;
   if(!hist){
     b+=`<div class="frow" style="margin-top:12px"><label class="f"><span>Desconto (−) ou extra (+)</span><input inputmode="decimal" id="vf-aj" value="${fmtIn(v.ajuste)}" placeholder="0,00"></label>`;
-    b+=isDark(v.canal)?`<label class="f"><span>Desconto da plataforma</span><input inputmode="decimal" id="vf-dp" value="${fmtIn(v.descPlat)}" placeholder="0,00"></label></div>`:`<label class="f"><span>Taxa maquininha (R$)</span><input inputmode="decimal" id="vf-maq" value="${fmtIn(v.maq)}" placeholder="${d.par.maqPct?N(d.par.maqPct)+"% automático":"0,00"}"></label></div>`;
+    b+=isDark(v.canal)?`<label class="f"><span>Desconto da plataforma</span><input inputmode="decimal" id="vf-dp" value="${fmtIn(v.descPlat)}" placeholder="0,00"></label></div>`:`<label class="f"><span>Taxa Mercado Pago (R$)</span><input inputmode="decimal" id="vf-maq" value="${fmtIn(v.maq)}" placeholder="${d.par.maqPct?N(d.par.maqPct)+"% automático":"0,00"}"></label></div><div class="frow"><label class="f"><span>Outra maquininha (R$)</span><input inputmode="decimal" id="vf-maq2" value="${fmtIn(v.maq2)}" placeholder="0,00"></label><div></div></div>`;
     if(isCar) b+=`<label class="check"><input type="checkbox" id="vf-sv" ${v.semVendedora?"":"checked"}> ${esc(vendNome(vendDe(v)))} trabalhou neste dia (diária + comissão)</label>`;
   }
   b+=`<label class="f"><span>Observação</span><textarea id="vf-obs">${esc(v.obs||"")}</textarea></label>`;
@@ -696,14 +696,14 @@ function readVenda(){
     if((vv||0)>0||(l||0)>0){const o={p,v:vv||0};const prod=D().prodMap[p];if(pr!=null&&(!prod||pr!==+precoCanal(prod,v.canal)))o.pr=pr; else if(pr!=null&&v.hist) o.pr=pr; if(l!=null)o.l=l;if(rv!=null)o.r=rv;const ant=(VF._itensOrig||[]).find(x=>x.p===p);if(ant&&ant.cu!=null&&+ant.v===+o.v&&v.d===VF._dOrig)o.cu=ant.cu;itens.push(o)}});
   v.itens=itens;
   if(v.hist){v.hist={q:numIn2(g("vf-hq"))||0,v:numIn2(g("vf-hv"))||0,l:numIn2(g("vf-hl"))||0}}
-  else{ v.ajuste=numIn2(g("vf-aj")); if($("#vf-maq")) v.maq=numIn2(g("vf-maq")); if($("#vf-dp")) v.descPlat=numIn2(g("vf-dp")); if($("#vf-sv")) v.semVendedora=!$("#vf-sv").checked; }
+  else{ v.ajuste=numIn2(g("vf-aj")); if($("#vf-maq")) v.maq=numIn2(g("vf-maq")); if($("#vf-maq2")) v.maq2=numIn2(g("vf-maq2")); if($("#vf-dp")) v.descPlat=numIn2(g("vf-dp")); if($("#vf-sv")) v.semVendedora=!$("#vf-sv").checked; }
   v.obs=g("vf-obs")||""; if($("#vf-rp")) v.repPago=$("#vf-rp").checked;
   return v;
 }
 function updVendaSum(){
   if(!VF) return; const v=readVenda(); const c=calcVenda(v);
   let x=`<div class="sumbar"><div><b class="num">${c.q}</b><span>unidades</span></div><div><b class="num">${R0(c.receita)}</b><span>receita</span></div><div><b class="num">${R0(c.custo)}</b><span>custos</span></div><div><b class="num ${sgn(c.lucro)}">${R0(c.lucro)}</b><span>lucro ${P(c.receita?c.lucro/c.receita:0)}</span></div></div>`;
-  if(!c.hist){ x+=`<div class="card pad small">${[["Custo dos produtos",c.custoProd],["Repasse do prédio",c.predio],["Vendedora (diária + comissão)",c.vendedora],["Maquininha",c.maq],["Plataforma / comissão Dark",c.plat]].filter(a=>a[1]).map(a=>`<div class="kv"><span>${a[0]}</span><b class="num">${R(a[1])}</b></div>`).join("")||'<span class="muted">Lance as unidades vendidas para ver os custos.</span>'}</div>`; }
+  if(!c.hist){ x+=`<div class="card pad small">${[["Custo dos produtos",c.custoProd],["Repasse do prédio",c.predio],["Vendedora (diária + comissão)",c.vendedora],["Maquininhas (Mercado Pago + outra)",c.maq],["Plataforma / comissão Dark",c.plat]].filter(a=>a[1]).map(a=>`<div class="kv"><span>${a[0]}</span><b class="num">${R(a[1])}</b></div>`).join("")||'<span class="muted">Lance as unidades vendidas para ver os custos.</span>'}</div>`; }
   if(!c.hist&&c.q>0){const d=D();const ls=c.itens.filter(i=>i.q>0).map(i=>{const p=d.prodMap[i.p];if(!p)return null;const m=custoBala(p,v.d),e=insUnitEm(d.insMap[p.embIns],v.d),a=+valorEm(p,"adesivo",v.d)||0,sc=isDark(v.canal)?(+valorEm(p,"sacolaD",v.d)||0):(+valorEm(p,"sacolaC",v.d)||0);return {p,q:i.q,m,e,a,sc,cu:i.cu,tot:i.custo,cong:Math.abs(m+e+a+sc-i.cu)>0.005}}).filter(Boolean);
     x+=`<button class="btn ghost" data-act="vfCusto" style="margin-top:6px">${VF.verCusto?"Ocultar":"Ver"} custo por produto</button>`;
     if(VF.verCusto) x+=`<div class="card tbl-wrap" style="margin-top:6px"><table><thead><tr><th>Produto</th><th>Un</th><th>Massa</th><th>Emb.</th><th>Adesivo</th><th>Sacola</th><th>Custo un.</th><th>Total</th></tr></thead><tbody>${ls.map(l=>`<tr><td>${esc(prodNome(l.p))}</td><td class="num">${l.q}</td><td class="num">${R(l.m)}</td><td class="num">${R(l.e)}</td><td class="num">${R(l.a)}</td><td class="num">${R(l.sc)}</td><td class="num"><b>${R(l.cu)}</b>${l.cong?"*":""}</td><td class="num">${R(l.tot)}</td></tr>`).join("")}<tr class="tot"><td>Total</td><td class="num">${c.q}</td><td></td><td></td><td></td><td></td><td></td><td class="num">${R(c.custoProd)}</td></tr></tbody></table></div>
