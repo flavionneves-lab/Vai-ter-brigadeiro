@@ -365,7 +365,7 @@ function calcVenda(v){
   (v.itens||[]).forEach(it=>{const p=d.prodMap[it.p];const vend=+it.v||0;const pr=it.pr!=null&&it.pr!==""?+it.pr:(p?(+precoCanal(p,v.canal)||0):0);const cu=it.cu!=null&&it.cu!==""?+it.cu:custoUnit(p,v.canal,v.d);q+=vend;bruto+=vend*pr;custo+=vend*cu;itens.push({p:it.p,q:vend,rec:vend*pr,custo:vend*cu,cu})});
   const isCar=v.canal==="Carrinho";
   if(v.hist){const h=v.hist;const f=bruto>0?h.v/bruto:0;itens.forEach(i=>{i.rec*=f});
-    const hl=h.l-(+v.mpTarifa||0);
+    const hl=h.l; /* o lucro da planilha (aba Geral) já desconta a maquininha */
     return {q:h.q,receita:h.v,lucro:hl,custo:h.v-hl,mpTarifa:+v.mpTarifa||0,hist:true,itens,detalhado:itens.length>0,
       predio:isCar&&pt.tipo==="Prédio"?h.v*(+pt.pct||0)/100+(+pt.fixo||0):0,vendedora:isCar&&!v.semVendedora?vendCalc(h.q):0,comissaoVend:isCar&&!v.semVendedora?vendCalc(h.q)-(+par.diaria||0):0}}
   const receita=bruto+(+v.ajuste||0);
@@ -396,7 +396,7 @@ function locais(){return [{id:"central",nome:"Cozinha"}].concat(carrinhos().map(
 const locNome=id=>{const l=locais().find(x=>x.id===id);return l?l.nome+(l.sub?" · "+l.sub:""):id};
 const sq=(e,id,loc)=>((e.prod[id]||{})[loc]||0);
 function pontosDoCar(car,extra){return D().cad.pontos.filter(p=>p.tipo!=="Online"&&(!p.car||p.car===car||p.id===extra))}
-const APP_VERSAO="26/10/2026 · custos com vigência";
+const APP_VERSAO="26/10/2026 · conferência com a planilha";
 const saidaItem=i=>(i.l!=null&&i.r!=null)?Math.max(0,(+i.l||0)-(+i.r||0)):(+i.v||0);
 
 /* ---------- Estoque ---------- */
@@ -615,6 +615,7 @@ function vInicio(){
   const pe=pontoEq(mes);
   let h=`<div style="display:flex;gap:10px;margin:2px 0 6px"><button class="btn pri" style="flex:1" data-act="novaVenda" data-canal="Carrinho">Lançar venda do carrinho</button><button class="btn" data-act="novaVenda" data-canal="Dark Store">Dark</button></div>`;
   const al=alertas();
+  {const ct=d.pontoMap["continental-square"];if(Store.papel!=="vendedora"&&ct&&(+ct.fixo||0)>0&&!(d.cad.flags||{}).cont0) al.unshift({k:"cont",t:`<b>Continental Square:</b> o prédio cobra só 10% da venda, sem valor fixo de R$ ${N(ct.fixo)} (conforme sua planilha). <a href="#" data-act="corrigirCont" style="color:var(--accent-text);font-weight:700">Corrigir</a> · <a href="#" data-act="dispensarCont" style="color:var(--ink-2)">Manter</a>`})}
   if(Store.papel!=="vendedora"&&!(d.cad.flags||{}).sac2110&&d.cad.produtos.some(p=>Math.abs((+p.sacolaC||0)-2.62)<0.005)) al.unshift({k:"sac",t:`<b>Sacola do carrinho:</b> aplicar R$ 1,20 por unidade a partir de 21/10/2026 nos produtos que hoje usam R$ 2,62? <a href="#" data-act="aplicarSacola" style="color:var(--accent-text);font-weight:700">Aplicar</a> · <a href="#" data-act="dispensarSacola" style="color:var(--ink-2)">Dispensar</a>`});const dsb=diasSemBackup();
   if(Store.mode==="local"&&(dsb===null||dsb>=7)) al.unshift({k:"bkp",t:`<b>${dsb===null?"Nenhum backup feito ainda.":"Último backup há "+dsb+" dias."}</b> Os dados ficam só neste aparelho. <a href="#" data-act="exportJSON" style="color:var(--accent-text);font-weight:700">Fazer backup agora</a>`});
   if(al.length) h+=`<div class="sec"><h2>Atenção</h2></div>`+al.slice(0,5).map(a=>`<div class="alert"><span>${a.t}</span></div>`).join("");
@@ -1122,7 +1123,7 @@ async function mpAplicar(){
   Object.values(alvo).forEach(a=>{const key="v-"+a.d.slice(0,7);const mp={r:Math.round(a.r*100)/100,t:Math.round(a.t*100)/100,q:a.q,tx:a.tx};
     const vs=mpDiaApp(a.d,a.car);const id="mp"+a.d.replace(/-/g,"")+(a.car==="c1"?"":a.car);
     const doc=get(key);const proprias=vs.filter(v=>v.id!==id);
-    if(proprias.length){proprias.forEach((v,k)=>{let x=doc.itens.find(y=>y.id===v.id);if(!x&&v.vv){x=clone(v);vvUpd.push(x)}if(!x)return;x.mp=mp;if(a.tar&&k===0){if(x.hist)x.mpTarifa=mp.t;else x.maq=mp.t}});atual++;return}
+    if(proprias.length){proprias.forEach((v,k)=>{let x=doc.itens.find(y=>y.id===v.id);if(!x&&v.vv){x=clone(v);vvUpd.push(x)}if(!x)return;x.mp=mp;if(a.tar&&k===0&&!x.hist){x.maq=mp.t}});atual++;return}
     const old=doc.itens.find(y=>y.id===id);if(!old&&!a.novo)return;const ponto=a.ponto||(old&&old.ponto)||"";if(!ponto){falta++;return}
     const itens=[];Object.entries(a.itens).forEach(([n,x])=>{const p=prodDe(n);if(!p||!x.q)return;const ex=itens.find(i=>i.p===p.id);const pr=x.semPreco?null:Math.round(x.tot/x.q*100)/100;
       if(ex){ex.v+=x.q}else{const o={p:p.id,v:x.q};if(pr!=null&&pr!==+p.precoC)o.pr=pr;itens.push(o)}});
@@ -1546,6 +1547,8 @@ const A={
   recarregar:()=>location.reload(),
   mpImport:()=>$("#mpIn").click(),
   formCustoMassa:()=>formCustoMassa(),
+  corrigirCont:async()=>{try{await saveCad(c=>{const p=c.pontos.find(x=>x.id==="continental-square");if(p)p.fixo=0;c.flags=Object.assign({},c.flags,{cont0:true})});toast("Continental Square agora sem valor fixo.");render()}catch(e){}},
+  dispensarCont:async()=>{try{await saveCad(c=>{c.flags=Object.assign({},c.flags,{cont0:true})});render()}catch(e){}},
   aplicarSacola:async()=>{try{const res=await aplicarVigencia("sacolaC",1.2,"2026-10-21",p=>Math.abs((+p.sacolaC||0)-2.62)<0.005);await saveCad(c=>{c.flags=Object.assign({},c.flags,{sac2110:true})});toast(`Sacola R$ 1,20 desde 21/10 em ${res.prods} produto(s); ${res.itens} item(ns) de vendas recalculados.`);render()}catch(e){}},
   dispensarSacola:async()=>{try{await saveCad(c=>{c.flags=Object.assign({},c.flags,{sac2110:true})});render()}catch(e){}},
   vfCusto:()=>{VF.verCusto=!VF.verCusto;updVendaSum()},
