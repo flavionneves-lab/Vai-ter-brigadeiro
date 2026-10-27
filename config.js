@@ -1,6 +1,6 @@
-/* Vai Ter Brigadeiro: conexão com o Supabase.
-   A chave "anon" é pública por natureza; os dados ficam protegidos pelo login e pelas regras de acesso. */
+/* Opcional: preencha para que o app já abra conectado ao seu Supabase.
+   Se deixar como está, a conexão pode ser feita dentro do app (Mais > Sincronização). */
 window.VTB_CONFIG = {
-  url: "https://umtdjmedwvbjctjrgaex.supabase.co",
-  key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVtdGRqbWVkd3ZiamN0anJnYWV4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0OTExODgsImV4cCI6MjEwODA2NzE4OH0.tI5TSo4m4Y4Z4D_O-Ah-6psFwIA9hCy4iEGaapJQUwI"
+  url: "COLE_AQUI_A_PROJECT_URL",   // ex.: https://abcdxyz.supabase.co
+  key: "COLE_AQUI_A_CHAVE_ANON"     // Project Settings > API > anon public
 };
