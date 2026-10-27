@@ -401,7 +401,7 @@ function locais(){return [{id:"central",nome:"Cozinha"}].concat(carrinhos().map(
 const locNome=id=>{const l=locais().find(x=>x.id===id);return l?l.nome+(l.sub?" · "+l.sub:""):id};
 const sq=(e,id,loc)=>((e.prod[id]||{})[loc]||0);
 function pontosDoCar(car,extra){return D().cad.pontos.filter(p=>p.tipo!=="Online"&&(!p.car||p.car===car||p.id===extra))}
-const APP_VERSAO="27/10/2026 · conferir custos v3";
+const APP_VERSAO="27/10/2026 · validade na embalagem";
 const saidaItem=i=>(i.l!=null&&i.r!=null)?Math.max(0,(+i.l||0)-(+i.r||0)):(+i.v||0);
 
 /* ---------- Estoque ---------- */
@@ -431,12 +431,20 @@ function estoque(semVV){
     else (v.itens||[]).forEach(i=>ap(i.p,"central",-(v.canal==="Carrinho"?saidaItem(i):(+i.v||0)))); });
   d[ck]={prod,ins,tracked,massa,balas};return d[ck];
 }
+function lotesProd(pid){
+  const d=D(),e=estoque();let rem=Math.max(0,totProd(e,pid));
+  const lots=[];d.movs.filter(m=>m.t==="embalagem").forEach(m=>(m.itens||[]).forEach(i=>{if(i.p===pid&&i.val&&(+i.q||0)>0)lots.push({d:m.d,val:i.val,q:+i.q,rem:0})}));
+  lots.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
+  for(let k=lots.length-1;k>=0&&rem>0;k--){const t=Math.min(lots[k].q,rem);lots[k].rem=t;rem-=t}
+  return lots.filter(l=>l.rem>0).sort((a,b)=>a.val<b.val?-1:1);
+}
 function alertas(){
   const d=D(),e=estoque(),out=[];
   d.cad.insumos.forEach(i=>{ if(e.tracked.has(i.id)&&(+i.minimo||0)>0&&(e.ins[i.id]||0)<(+i.minimo)) out.push({k:"ins",t:`<b>${esc(i.nome)}</b> abaixo do mínimo: ${N(e.ins[i.id]||0)} ${esc(i.unid)} (mínimo ${N(i.minimo)})`}) });
   const hoje=isoToday(),lim=addDays(hoje,+d.par.alertaValidade||5);
   d.movs.filter(m=>(m.t==="envio"||m.t==="transf")&&m.validade&&m.validade<=lim&&m.validade>=addDays(hoje,-3)).forEach(m=>{
     const q=(m.itens||[]).reduce((s,i)=>s+(+i.q||0),0); out.push({k:"val",t:`Envio para ${esc(locNome(m.para||"dark"))} de ${fmtDM(m.d)} (${q} un) vence em <b>${fmtD(m.validade)}</b>`}) });
+  d.cad.produtos.forEach(p=>{lotesProd(p.id).filter(l=>l.val<=lim).forEach(l=>out.push({k:"val",t:`<b>${esc(prodNome(p))}</b>: ${l.rem} un embaladas em ${fmtDM(l.d)} ${l.val<hoje?"venceram":"vencem"} em <b>${fmtD(l.val)}</b>`}))});
   Object.entries(e.prod).forEach(([id,s])=>{ const neg=Object.entries(s).filter(([,q])=>q<0).map(([l])=>locNome(l)); if(neg.length){const p=d.prodMap[id];out.push({k:"neg",t:`Estoque negativo de <b>${esc(prodNome(p))}</b> em ${esc(neg.join(", "))}. Faça uma transferência ou contagem.`})} });
   return out;
 }
@@ -552,10 +560,11 @@ function openEmbalar(m,rec0){
 function drawEmbalar(){
   const d=D(),e=estoque(),m=VF.mov;const orig=VF.novo?null:d.movs.find(x=>x.id===m.id);
   const usadoOrig=orig?(orig.itens||[]).reduce((s,i)=>s+(+i.q||0)*balasPack(d.prodMap[i.p]),0):0;const disp=(e.balas[m.rec]||0)+usadoOrig;
-  const ps=prodsSabor(m.rec);const im={};(m.itens||[]).forEach(i=>im[i.p]=i.q);
+  const ps=prodsSabor(m.rec);const im={};(m.itens||[]).forEach(i=>im[i.p]=i);
   let b=`<div class="frow"><label class="f"><span>Data da embalagem</span><input type="date" id="pf-d" value="${esc(m.d)}"></label><label class="f"><span>Sabor</span><select id="em-rec">${d.cad.receitas.map(x=>`<option value="${esc(x.id)}" ${x.id===m.rec?"selected":""}>${esc(x.sabor)} (${N(Math.max(0,e.balas[x.id]||0))} balas)</option>`).join("")}</select></label></div>
   <button class="btn block" data-act="embSugerir" style="margin-bottom:10px">Preencher com a sugestão (próximos ${VF.H} dias)</button>
-  <div class="card pad" id="pf-itens">${ps.map(p=>`<div class="itemrow" data-p="${esc(p.id)}"><div class="nm">${esc(p.emb)}<small>${balasPack(p)} balas por pacote · estoque ${totProd(e,p.id)}</small></div><div class="ctr"><button type="button" data-act="ctr" data-d="-1" aria-label="Menos">−</button><input data-f="v" inputmode="numeric" value="${im[p.id]||""}" placeholder="0"><button type="button" class="plus" data-act="ctr" data-d="1" aria-label="Mais">+</button></div></div>`).join("")||'<p class="muted">Nenhum produto ativo deste sabor.</p>'}</div>
+  <label class="f"><span>Validade para todos os pacotes (opcional, preenche os campos abaixo)</span><input type="date" id="em-valall"></label>
+  <div class="card pad" id="pf-itens">${ps.map(p=>`<div class="itemrow" data-p="${esc(p.id)}"><div class="nm">${esc(p.emb)}<small>${balasPack(p)} balas por pacote · estoque ${totProd(e,p.id)}</small><small>Validade <input type="date" class="mini-in" style="width:142px;text-align:left" data-f="val" value="${esc((im[p.id]||{}).val||"")}" aria-label="Validade de ${esc(prodNome(p))}"></small></div><div class="ctr"><button type="button" data-act="ctr" data-d="-1" aria-label="Menos">−</button><input data-f="v" inputmode="numeric" value="${(im[p.id]||{}).q||""}" placeholder="0"><button type="button" class="plus" data-act="ctr" data-d="1" aria-label="Mais">+</button></div></div>`).join("")||'<p class="muted">Nenhum produto ativo deste sabor.</p>'}</div>
   <p class="help" id="em-res" style="margin-top:8px"></p>
   <label class="f"><span>Para onde vão os pacotes</span><select id="pf-dest">${locais().map(l=>`<option value="${esc(l.id)}" ${m.dest===l.id?"selected":""}>${esc(locNome(l.id))}</option>`).join("")}<option value="dividir" ${m.dest==="dividir"?"selected":""}>Dividir entre os locais</option></select></label>
   <div id="pf-dist"></div>
@@ -565,7 +574,7 @@ function drawEmbalar(){
 }
 function readEmb(){const m=VF.mov;m.d=$("#pf-d").value;m.rec=$("#em-rec").value;m.obs=$("#em-obs").value;m.dest=$("#pf-dest").value;
   VF.dist=VF.dist||{};document.querySelectorAll("#pf-dist input[data-l]").forEach(inp=>{const p=inp.dataset.p,l=inp.dataset.l;VF.dist[p]=VF.dist[p]||{};const v=numIn2(inp.value);if(v>0)VF.dist[p][l]=v;else delete VF.dist[p][l]});
-  m.itens=[];document.querySelectorAll("#pf-itens .itemrow").forEach(r=>{const q=numIn2(r.querySelector('[data-f="v"]').value)||0;if(q>0){const it={p:r.dataset.p,q};if(m.dest==="dividir"){const ds=VF.dist[it.p]||{};if(Object.keys(ds).length)it.dist=Object.assign({},ds)}m.itens.push(it)}});return m}
+  m.itens=[];document.querySelectorAll("#pf-itens .itemrow").forEach(r=>{const q=numIn2(r.querySelector('[data-f="v"]').value)||0;if(q>0){const it={p:r.dataset.p,q};const vl=r.querySelector('[data-f="val"]');if(vl&&vl.value)it.val=vl.value;if(m.dest==="dividir"){const ds=VF.dist[it.p]||{};if(Object.keys(ds).length)it.dist=Object.assign({},ds)}m.itens.push(it)}});return m}
 function updEmb(full){if(!VF||!VF.mov||VF.mov.t!=="embalagem"||!$("#em-res"))return;const d=D(),m=readEmb();const usa=m.itens.reduce((s,i)=>s+i.q*balasPack(d.prodMap[i.p]),0);const resta=VF.disp-usa;
   $("#em-res").innerHTML=`Balas usadas: <b>${usa}</b> de ${N(VF.disp)} disponíveis${resta<0?` <span class="neg">— faltam ${-resta} balas. Registre o corte antes.</span>`:` · sobram ${N(resta)}`}.`;
   if(full!==false)drawDist();else updRest()}
@@ -741,9 +750,9 @@ function vEstoque(){
   if(UI.estTab==="produtos"){
     const loc=UI.estLoc||"todos";
     h+=`<div class="chips" role="group" aria-label="Local">${[{id:"todos",nome:"Todos"}].concat(L).map(l=>`<button class="chip" data-act="estLoc" data-k="${esc(l.id)}" aria-pressed="${loc===l.id}">${esc(l.nome)}</button>`).join("")}</div>`;
-    const prods=d.cad.produtos.filter(p=>p.ativo||Object.values(e.prod[p.id]||{}).some(q=>q));
+    const prods=d.cad.produtos.filter(p=>p.ativo||Object.values(e.prod[p.id]||{}).some(q=>q));const hoje0=isoToday();
     if(loc==="todos"){
-      h+=`<div class="card tbl-wrap"><table><thead><tr><th>Produto</th>${L.map(l=>`<th>${esc(l.nome)}</th>`).join("")}<th>Total</th></tr></thead><tbody>${prods.map(p=>{let t=0;const tds=L.map(l=>{const q=sq(e,p.id,l.id);t+=q;return `<td class="num ${q<0?"neg":""}">${q||"·"}</td>`}).join("");return `<tr><td>${esc(prodNome(p))}</td>${tds}<td class="num"><b>${t}</b></td></tr>`}).join("")}<tr class="tot"><td>Total</td>${L.map(l=>`<td class="num">${tot(l)}</td>`).join("")}<td class="num">${L.reduce((s,l)=>s+tot(l),0)}</td></tr></tbody></table></div>`;
+      h+=`<div class="card tbl-wrap"><table><thead><tr><th>Produto</th>${L.map(l=>`<th>${esc(l.nome)}</th>`).join("")}<th>Total</th><th>Validade</th></tr></thead><tbody>${prods.map(p=>{let t=0;const tds=L.map(l=>{const q=sq(e,p.id,l.id);t+=q;return `<td class="num ${q<0?"neg":""}">${q||"·"}</td>`}).join("");const lt=lotesProd(p.id)[0];return `<tr><td>${esc(prodNome(p))}</td>${tds}<td class="num"><b>${t}</b></td><td class="num ${lt&&lt.val<hoje0?"neg":""}">${lt?fmtDM(lt.val):"·"}</td></tr>`}).join("")}<tr class="tot"><td>Total</td>${L.map(l=>`<td class="num">${tot(l)}</td>`).join("")}<td class="num">${L.reduce((s,l)=>s+tot(l),0)}</td><td></td></tr></tbody></table></div>`;
     }else{
       const lo=L.find(l=>l.id===loc)||L[0];const hj=isoToday();const vend={};d.vendas.filter(v=>v.d===hj&&!v.hist&&((loc==="dark"&&isDark(v.canal))||(v.estLoc===loc))).forEach(v=>(v.itens||[]).forEach(i=>vend[i.p]=(vend[i.p]||0)+(+i.v||0)));
       const temV=Object.keys(vend).length;
@@ -799,8 +808,7 @@ function updRest(){const m=VF.mov;(m.itens||[]).forEach(i=>{const el=document.qu
 function updProd(full){const d=D(),m=readProd(),r=d.recMap[m.rec];if(full!==false)drawDist();else updRest();if(!r)return;const massa=(+r.rend||0)*(+m.n||0)/(+r.n||1);const g=m.itens.reduce((s,i)=>s+i.q*(+(d.prodMap[i.p]||{}).peso||0),0);$("#pf-g").innerHTML=`Porcionado: <b>${N(g)} g</b> de ${N(massa)} g${g>massa*1.02?' <span class="neg">— acima do rendimento estimado</span>':""}`}
 function openTransf(m,preset){
   if(m&&m.t==="envio"){m=Object.assign(clone(m),{t:"transf",de:"central",para:"dark"})}
-  const pr=preset||{};VF={mov:m?clone(m):{id:uid("m"),t:"transf",d:isoToday(),de:pr.de||"central",para:pr.para||"dark",validade:"",itens:[]},novo:!m};
-  if(VF.novo&&VF.mov.para==="dark")VF.mov.validade=addDays(isoToday(),10);
+  const pr=preset||{};VF={mov:m?clone(m):{id:uid("m"),t:"transf",d:isoToday(),de:pr.de||"central",para:pr.para||"dark",itens:[]},novo:!m};
   drawTransf();
 }
 function drawTransf(){
@@ -809,7 +817,7 @@ function drawTransf(){
   const opt=sel=>L.map(l=>`<option value="${esc(l.id)}" ${l.id===sel?"selected":""}>${esc(locNome(l.id))}</option>`).join("");
   const paraCar=carrinhos().some(c=>c.id===mm.para);
   let b=`<div class="frow"><label class="f"><span>De</span><select id="tf-de">${opt(mm.de)}</select></label><label class="f"><span>Para</span><select id="tf-para">${opt(mm.para)}</select></label></div>
-  <div class="frow"><label class="f"><span>Data</span><input type="date" id="tf-d" value="${esc(mm.d)}"></label><label class="f"><span>Validade (opcional)</span><input type="date" id="tf-val" value="${esc(mm.validade||"")}"></label></div>`;
+  <div class="frow"><label class="f"><span>Data</span><input type="date" id="tf-d" value="${esc(mm.d)}"></label><div></div></div>`;
   if(paraCar){const hj=isoToday();const es=d.escala.filter(x=>escCar(x)===mm.para&&x.d>=hj).sort((a,b)=>a.d<b.d?-1:1)[0];const pt=es?d.pontoMap[es.ponto]:null;
     b+=pt?`<button class="btn block" data-act="tfSugerir" data-ponto="${esc(pt.id)}" style="margin-bottom:10px">Sugestão para ${esc(pt.nome)} (${fmtDM(es.d)}), descontando o que já está no carrinho</button>`:`<p class="help">Agende o próximo ponto deste carrinho na Escala para receber uma sugestão de quantidades.</p>`;}
   b+=`<div class="card pad" id="tf-itens">${prods.map(p=>`<div class="itemrow" data-p="${esc(p.id)}"><div class="nm">${esc(prodNome(p))}<small data-after="${esc(p.id)}" data-o="${sq(e,p.id,mm.de)}" data-dd="${sq(e,p.id,mm.para)}">${esc(L.find(l=>l.id===mm.de)?.nome||"")}: ${sq(e,p.id,mm.de)} · ${esc(L.find(l=>l.id===mm.para)?.nome||"")}: ${sq(e,p.id,mm.para)}</small></div><div class="ctr"><button type="button" data-act="ctr" data-d="-1" aria-label="Menos">−</button><input data-f="v" inputmode="numeric" value="${im[p.id]||""}" placeholder="0"><button type="button" class="plus" data-act="ctr" data-d="1" aria-label="Mais">+</button></div></div>`).join("")||'<p class="muted">Nenhum produto disponível.</p>'}</div>
@@ -818,7 +826,7 @@ function drawTransf(){
   openSheet("Transferir estoque",b,`<button class="btn" data-act="closeSheet">Cancelar</button><button class="btn pri" style="flex:1" data-act="saveTransf">Salvar transferência</button>`);
   updTransf();
 }
-function readTransf(){const m=VF.mov;m.de=$("#tf-de").value;m.para=$("#tf-para").value;m.d=$("#tf-d").value;m.validade=$("#tf-val").value;m.obs=$("#tf-obs").value;m.itens=[];document.querySelectorAll("#tf-itens .itemrow").forEach(r=>{const q=numIn2(r.querySelector('[data-f="v"]').value)||0;if(q>0)m.itens.push({p:r.dataset.p,q})});return m}
+function readTransf(){const m=VF.mov;m.de=$("#tf-de").value;m.para=$("#tf-para").value;m.d=$("#tf-d").value;m.obs=$("#tf-obs").value;m.itens=[];document.querySelectorAll("#tf-itens .itemrow").forEach(r=>{const q=numIn2(r.querySelector('[data-f="v"]').value)||0;if(q>0)m.itens.push({p:r.dataset.p,q})});return m}
 function updTransf(){if(!VF||!VF.mov||VF.mov.t!=="transf"||!$("#tf-tot"))return;const m=readTransf(),e=estoque();const t=m.itens.reduce((s,i)=>s+i.q,0);const falta=m.itens.filter(i=>i.q>sq(e,i.p,m.de)).length;
   const L=locais(),on=(L.find(l=>l.id===m.de)||{}).nome||"",dn=(L.find(l=>l.id===m.para)||{}).nome||"";document.querySelectorAll("#tf-itens [data-after]").forEach(el=>{const it=m.itens.find(i=>i.p===el.dataset.after);const q=it?it.q:0;const o=+el.dataset.o,dd=+el.dataset.dd;el.innerHTML=q?`${esc(on)}: ${o} → <b class="${o-q<0?"neg":""}">${o-q}</b> · ${esc(dn)}: ${dd} → <b>${dd+q}</b>`:`${esc(on)}: ${o} · ${esc(dn)}: ${dd}`});
   $("#tf-tot").innerHTML=`${t} un de ${esc(locNome(m.de))} para ${esc(locNome(m.para))}.${falta?` <span class="neg">${falta} produto(s) acima do saldo da origem.</span>`:""}`}
@@ -1613,7 +1621,7 @@ window.VTB_CONFIG = {
   corteTudo:e=>{$("#ct2-n").value=e.dataset.max;updCorte()},
   saveCorte:async()=>{const m=readCorte();if(!m.cortes){toast("Informe o número de cortes.");return}if(m.g>VF.massaDisp+0.5&&!confirm("O corte usa mais massa do que a registrada. Salvar mesmo assim?"))return;const orig=D().movs.find(x=>x.id===m.id);try{await saveMov(m,orig);closeSheet();toast(m.balas+" balas cortadas.");UI.tab="estoque";UI.estTab="producao";render()}catch(e){}},
   embSugerir:()=>{const m=readEmb();const sg=sugestaoEmb(m.rec,VF.disp,VF.H);document.querySelectorAll("#pf-itens .itemrow").forEach(r=>{const x=sg.rows.find(y=>y.p.id===r.dataset.p);r.querySelector('[data-f="v"]').value=x&&x.packs?x.packs:""});updEmb(true);toast("Sugestão aplicada. Ajuste se precisar.")},
-  saveEmbalar:async()=>{const m=readEmb();if(!m.itens.length){toast("Informe os pacotes.");return}const usa=m.itens.reduce((s,i)=>s+i.q*balasPack(D().prodMap[i.p]),0);if(usa>VF.disp+0.5&&!confirm("Vai usar mais balas do que há cortadas. Salvar mesmo assim?"))return;if(m.itens.some(i=>Object.values(i.dist||{}).reduce((s,x)=>s+(+x||0),0)>i.q)){toast("A divisão passou do total de algum produto.");return}if(m.dest==="dividir"&&!m.itens.some(i=>i.dist))m.dest="central";const orig=D().movs.find(x=>x.id===m.id);try{await saveMov(m,orig);closeSheet();toast("Embalagem registrada.");UI.tab="estoque";UI.estTab="producao";render()}catch(e){}},
+  saveEmbalar:async()=>{const m=readEmb();if(!m.itens.length){toast("Informe os pacotes.");return}const usa=m.itens.reduce((s,i)=>s+i.q*balasPack(D().prodMap[i.p]),0);if(usa>VF.disp+0.5&&!confirm("Vai usar mais balas do que há cortadas. Salvar mesmo assim?"))return;const semVal=m.itens.filter(i=>!i.val).length;if(semVal&&!confirm(semVal+" produto(s) sem data de validade. Salvar mesmo assim?"))return;if(m.itens.some(i=>Object.values(i.dist||{}).reduce((s,x)=>s+(+x||0),0)>i.q)){toast("A divisão passou do total de algum produto.");return}if(m.dest==="dividir"&&!m.itens.some(i=>i.dist))m.dest="central";const orig=D().movs.find(x=>x.id===m.id);try{await saveMov(m,orig);closeSheet();toast("Embalagem registrada.");UI.tab="estoque";UI.estTab="producao";render()}catch(e){}},
   vtab:e=>{UI.vtab=e.dataset.k;window.scrollTo(0,0);render()},vrMes:e=>{UI.vrMes=e.dataset.k;render()},
   novaVendaV:()=>openVendaV(),editVendaV:e=>{const v=Store.vv[e.dataset.id];if(v)openVendaV(v)},
   saveVendaV:async()=>{const v=readVendaV();if(!v.ponto){toast("Escolha o ponto.");return}if(!v.itens.length){toast("Informe o que foi vendido.");return}try{await Store.saveVV(v);closeSheet();toast("Venda salva.");render()}catch(e){}},
@@ -1640,6 +1648,7 @@ document.addEventListener("change",e=>{if(!VF)return;
   if(e.target.id==="ms-rec"){readMassa();const rr=D().recMap[VF.mov.rec];VF.mov.n=rr?rr.n:6;VF.mov.peso=null;drawMassa();return}
   if(e.target.id==="ms-n"){readMassa();drawMassa();return}
   if(e.target.id==="ct2-rec"){readCorte();VF.mov.cortes=0;drawCorte();return}
+  if(e.target.id==="em-valall"){const v=e.target.value;document.querySelectorAll('#pf-itens [data-f="val"]').forEach(x=>x.value=v);return}
   if(e.target.id==="em-rec"){readEmb();VF.mov.itens=[];VF.dist={};drawEmbalar();return}
   if(e.target.id==="pf-dest"&&VF.mov&&VF.mov.t==="embalagem"){updEmb(true);return}
   if(e.target.id==="vf-car"){readVenda();const car=e.target.value;VF.v.carrinho=car;VF.v.vendedora=vendPadrao(car);const es=escalaDe(VF.v.d,car);VF.v.ponto=es?es.ponto:"";drawVenda();return}
@@ -1651,7 +1660,11 @@ document.addEventListener("change",e=>{if(!VF)return;
   else if((e.target.closest("#rf-itens")||e.target.id==="rf-n"||e.target.id==="rf-rend")&&VF.upd){VF.upd()}
 });
 render();Store.init();
-if("serviceWorker" in navigator&&location.protocol==="https:"){navigator.serviceWorker.register("sw.js").catch(()=>{})}
+if("serviceWorker" in navigator&&location.protocol==="https:"){
+  const tinhaSW=!!navigator.serviceWorker.controller;let recarregou=false;
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{if(!tinhaSW||recarregou)return;recarregou=true;location.reload()});
+  navigator.serviceWorker.register("sw.js",{updateViaCache:"none"}).then(reg=>{reg.update().catch(()=>{});document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")reg.update().catch(()=>{})})}).catch(()=>{});
+}
 </script>
 </body>
 </html>
