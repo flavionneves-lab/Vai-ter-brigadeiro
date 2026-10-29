@@ -401,7 +401,7 @@ function locais(){return [{id:"central",nome:"Cozinha"}].concat(carrinhos().map(
 const locNome=id=>{const l=locais().find(x=>x.id===id);return l?l.nome+(l.sub?" · "+l.sub:""):id};
 const sq=(e,id,loc)=>((e.prod[id]||{})[loc]||0);
 function pontosDoCar(car,extra){return D().cad.pontos.filter(p=>p.tipo!=="Online"&&(!p.car||p.car===car||p.id===extra))}
-const APP_VERSAO="27/10/2026 · validade na embalagem";
+const APP_VERSAO="29/10/2026 · vendas do dia consolidadas";
 const saidaItem=i=>(i.l!=null&&i.r!=null)?Math.max(0,(+i.l||0)-(+i.r||0)):(+i.v||0);
 
 /* ---------- Estoque ---------- */
@@ -487,6 +487,31 @@ async function aplicarVigencia(campo,novo,desde,filtro){
 function congelarCusto(v){if(!v||v.hist)return v;const d=D();(v.itens||[]).forEach(i=>{const p=d.prodMap[i.p];if(p)i.cu=Math.round(custoUnit(p,v.canal,v.d)*10000)/10000});return v}
 async function gravarVenda(v,orig){ if(!orig||orig.d!==v.d||JSON.stringify(orig.itens||[])!==JSON.stringify(v.itens||[])||orig.canal!==v.canal) congelarCusto(v); else (v.itens||[]).forEach((i,k)=>{const o=(orig.itens||[])[k];if(o&&o.cu!=null&&i.cu==null)i.cu=o.cu}); if(v.vv){ await Store.saveVV(v); return } if(orig&&orig.d.slice(0,7)!==v.d.slice(0,7)) await removeFromMonth("v-"+orig.d.slice(0,7),v.id); await upsertMonth("v-"+v.d.slice(0,7),v) }
 async function apagarVenda(v){ if(v.vv) return Store.removeVV(v.id); return removeFromMonth("v-"+v.d.slice(0,7),v.id) }
+
+/* ================= Consolidação das vendas da vendedora ================= */
+function somarVendas(base,outros){
+  const m=clone(base);m.itens=m.itens||[];const chave=i=>i.p+"|"+(i.pr!=null?+i.pr:"");const mapa={};
+  m.itens.forEach(i=>{mapa[chave(i)]=i});
+  outros.forEach(o=>{
+    if((m.merged||[]).includes(o.id))return;
+    (o.itens||[]).forEach(i=>{const k=chave(i);if(mapa[k]){mapa[k].v=(+mapa[k].v||0)+(+i.v||0)}else{const c=clone(i);m.itens.push(c);mapa[k]=c}});
+    ["maq","maq2","ajuste","descPlat"].forEach(f=>{if(o[f]!=null&&o[f]!==""){m[f]=(+m[f]||0)+(+o[f])}});
+    if(o.obs&&!String(m.obs||"").includes(o.obs))m.obs=(m.obs?m.obs+" · ":"")+o.obs;
+    if(!o.semVendedora)m.semVendedora=false;
+    if(!m.mp&&o.mp)m.mp=o.mp;
+    m.merged=(m.merged||[]).concat([o.id]);
+  });
+  return m;
+}
+function gruposSeparados(){
+  const g={};Object.values(Store.vv||{}).forEach(v=>{if(v.canal!=="Carrinho")return;const k=v.d+"|"+carDe(v)+"|"+v.ponto;(g[k]=g[k]||[]).push(v)});
+  return Object.values(g).filter(a=>a.length>1).map(a=>a.slice().sort((x,y)=>String(x.id)<String(y.id)?-1:1)).sort((a,b)=>a[0].d<b[0].d?-1:1);
+}
+async function consolidarVendas(){
+  let n=0,rem=0;
+  for(const a of gruposSeparados()){const m=somarVendas(a[0],a.slice(1));congelarCusto(m);await Store.saveVV(m);for(const o of a.slice(1)){await Store.removeVV(o.id);rem++}n++}
+  return {grupos:n,removidas:rem};
+}
 
 /* ================= Produção em etapas ================= */
 const prodsSabor=rec=>{const d=D(),r=d.recMap[rec];return r?d.cad.produtos.filter(p=>p.sabor===r.sabor&&(+p.peso||0)>0&&(p.ativo||Object.values(estoque().prod[p.id]||{}).some(q=>q))):[]};
@@ -658,6 +683,7 @@ function vVendas(){
   let h=`<div class="chips" role="group" aria-label="Mês">${ms.map(k=>`<button class="chip" data-act="vMes" data-k="${k}" aria-pressed="${k===m}">${mesCurto(k)}</button>`).join("")}</div>
   ${multiCar()?`<div class="chips" role="group" aria-label="Carrinho">${[["todos","Todos"]].concat(carrinhos().map(c=>[c.id,c.nome])).concat([["online","Dark e outros"]]).map(([k,l])=>`<button class="chip" data-act="vFil" data-k="${esc(k)}" aria-pressed="${fil===k}">${esc(l)}</button>`).join("")}</div>`:""}
   <div style="display:flex;gap:10px;margin:6px 0 12px"><button class="btn pri" style="flex:1" data-act="novaVenda" data-canal="Carrinho">Nova venda</button><button class="btn" data-act="exportTela">Baixar Excel</button></div>`;
+  {const sep=gruposSeparados();if(sep.length)h+=`<div class="alert"><span><b>${sep.length} dia(s) com vendas da vendedora lançadas separadas</b> (${sep.reduce((s,a)=>s+a.length,0)} lançamentos). <a href="#" data-act="consolidar" style="color:var(--accent-text);font-weight:700">Consolidar agora</a></span></div>`}
   h+=list.length?`<div class="card"><div class="list">${list.map(rowVenda).join("")}</div></div>`:`<div class="card empty"><h3>Sem vendas em ${mesNome(m)}</h3><p>Toque em “Nova venda” para lançar o primeiro dia.</p></div>`;
   return h;
 }
@@ -1624,7 +1650,7 @@ window.VTB_CONFIG = {
   saveEmbalar:async()=>{const m=readEmb();if(!m.itens.length){toast("Informe os pacotes.");return}const usa=m.itens.reduce((s,i)=>s+i.q*balasPack(D().prodMap[i.p]),0);if(usa>VF.disp+0.5&&!confirm("Vai usar mais balas do que há cortadas. Salvar mesmo assim?"))return;const semVal=m.itens.filter(i=>!i.val).length;if(semVal&&!confirm(semVal+" produto(s) sem data de validade. Salvar mesmo assim?"))return;if(m.itens.some(i=>Object.values(i.dist||{}).reduce((s,x)=>s+(+x||0),0)>i.q)){toast("A divisão passou do total de algum produto.");return}if(m.dest==="dividir"&&!m.itens.some(i=>i.dist))m.dest="central";const orig=D().movs.find(x=>x.id===m.id);try{await saveMov(m,orig);closeSheet();toast("Embalagem registrada.");UI.tab="estoque";UI.estTab="producao";render()}catch(e){}},
   vtab:e=>{UI.vtab=e.dataset.k;window.scrollTo(0,0);render()},vrMes:e=>{UI.vrMes=e.dataset.k;render()},
   novaVendaV:()=>openVendaV(),editVendaV:e=>{const v=Store.vv[e.dataset.id];if(v)openVendaV(v)},
-  saveVendaV:async()=>{const v=readVendaV();if(!v.ponto){toast("Escolha o ponto.");return}if(!v.itens.length){toast("Informe o que foi vendido.");return}try{await Store.saveVV(v);closeSheet();toast("Venda salva.");render()}catch(e){}},
+  saveVendaV:async()=>{const v=readVendaV();if(!v.ponto){toast("Escolha o ponto.");return}if(!v.itens.length){toast("Informe o que foi vendido.");return}try{const alvo=VF.novo?minhasVendas().find(x=>x.id!==v.id&&x.d===v.d&&x.ponto===v.ponto&&x.carrinho===v.carrinho):null;if(alvo){await Store.saveVV(somarVendas(alvo,[v]));closeSheet();toast("Somada à venda do dia neste ponto.");render();return}await Store.saveVV(v);closeSheet();toast("Venda salva.");render()}catch(e){}},
   delVendaV:async()=>{if(!confirm("Excluir esta venda?"))return;try{await Store.removeVV(VF.v.id);closeSheet();toast("Venda excluída.");render()}catch(e){}},
   formAcesso:e=>formAcesso(e.dataset.email),
   exportTela:()=>exportTela(),
@@ -1636,6 +1662,7 @@ window.VTB_CONFIG = {
   vfSugerir:()=>{const v=readVenda();if(!v.ponto){toast("Escolha o ponto primeiro.");return}const x=sugestaoPonto(v.ponto);if(!x.prods.length){toast("Ainda não há histórico de sabores neste ponto.");return}
     x.prods.forEach(sg=>{let it=v.itens.find(i=>i.p===sg.id);if(!it){it={p:sg.id,v:0};v.itens.push(it)}it.l=sg.levar});drawVenda();toast("Sugestão aplicada ("+x.prods.reduce((s,r)=>s+r.levar,0)+" un). Ajuste se precisar.")},
   mpAplicar:()=>mpAplicar(),
+  consolidar:async()=>{const gs=gruposSeparados();if(!gs.length)return;const tot=gs.reduce((s,a)=>s+a.length,0);if(!confirm(`Juntar ${tot} lançamentos em ${gs.length} venda(s), uma por dia, ponto e carrinho? A taxa da maquininha lançada em cada uma será somada.`))return;try{const r=await consolidarVendas();toast(`${r.grupos} dia(s) consolidado(s).`);render()}catch(e){toast("Não deu para concluir. Toque em Consolidar de novo.");render()}},
   exportCSV:()=>exportCSV(),exportJSON:()=>exportJSON(),importar:()=>$("#fileIn").click()
 };
 document.addEventListener("click",e=>{const a=e.target.closest("[data-act]");if(!a)return;if(a.tagName==="TR"&&e.target.closest("input,select"))return;const fn=A[a.dataset.act];if(fn){e.preventDefault();fn(a)}});
